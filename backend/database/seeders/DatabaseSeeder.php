@@ -158,7 +158,7 @@ class DatabaseSeeder extends Seeder
 
         // 5. Data Mata Pelajaran / Course (SMA Mitra Inalum)
         $course = Course::updateOrCreate(
-            ['title' => 'Algoritma & Struktur Data'],
+            ['school_id' => $school1->id, 'title' => 'Algoritma & Struktur Data'],
             [
                 'description' => 'Materi pembelajaran terstruktur untuk memahami konsep dasar komputasi, array, dan efisiensi algoritma.',
                 'instructor_id' => $guru->id,
@@ -167,7 +167,7 @@ class DatabaseSeeder extends Seeder
         );
 
         $course2 = Course::updateOrCreate(
-            ['title' => 'Basis Data Relasional'],
+            ['school_id' => $school1->id, 'title' => 'Basis Data Relasional'],
             [
                 'description' => 'Perancangan skema database relasional, normalisasi 3NF, dan optimasi query SQL.',
                 'instructor_id' => $guru2->id,
@@ -176,7 +176,7 @@ class DatabaseSeeder extends Seeder
         );
 
         $course3 = Course::updateOrCreate(
-            ['title' => 'Rekayasa Perangkat Lunak'],
+            ['school_id' => $school1->id, 'title' => 'Rekayasa Perangkat Lunak'],
             [
                 'description' => 'Metodologi Agile/Scrum, perancangan arsitektur modular, dan testing sistem.',
                 'instructor_id' => $guru3->id,
@@ -186,7 +186,7 @@ class DatabaseSeeder extends Seeder
 
         // 6. Data Kelas / Rombongan Belajar (SMA Mitra Inalum)
         $class1 = Classroom::updateOrCreate(
-            ['code' => 'TI-A'],
+            ['school_id' => $school1->id, 'code' => 'TI-A'],
             [
                 'name' => 'Teknik Informatika - A',
                 'homeroom_teacher_id' => $guru->id,
@@ -197,7 +197,7 @@ class DatabaseSeeder extends Seeder
         );
 
         $class2 = Classroom::updateOrCreate(
-            ['code' => 'TI-B'],
+            ['school_id' => $school1->id, 'code' => 'TI-B'],
             [
                 'name' => 'Teknik Informatika - B',
                 'homeroom_teacher_id' => $guru2->id,
@@ -308,7 +308,11 @@ class DatabaseSeeder extends Seeder
         $quiz = Quiz::updateOrCreate(
             ['lesson_id' => $lesson1->id],
             [
+                'school_id' => $school1->id,
+                'teacher_id' => $guru->id,
+                'classroom_id' => $class1->id,
                 'course_id' => $course->id,
+                'is_active' => true,
                 'title' => 'Kuis Pemahaman Pertemuan 1 - Konsep Dasar Array',
                 'instructions' => 'Pilihlah salah satu jawaban yang paling tepat. Waktu pengerjaan adalah 20 menit. Nilai akan otomatis dikalkulasi setelah Anda menekan tombol kumpulkan.',
                 'duration_minutes' => 20,
@@ -386,6 +390,8 @@ class DatabaseSeeder extends Seeder
         QuizOption::updateOrCreate(['question_id' => $q5->id, 'option_label' => 'A'], ['option_text' => 'Menghapus seluruh isi array', 'is_correct' => false]);
         QuizOption::updateOrCreate(['question_id' => $q5->id, 'option_label' => 'B'], ['option_text' => 'Mengunjungi dan memproses setiap elemen array satu per satu', 'is_correct' => true]);
         QuizOption::updateOrCreate(['question_id' => $q5->id, 'option_label' => 'C'], ['option_text' => 'Menyalin array ke file eksternal', 'is_correct' => false]);
+        QuizOption::updateOrCreate(['question_id' => $q5->id, 'option_label' => 'D'], ['option_text' => 'Mengurutkan elemen array secara menaik', 'is_correct' => false]);
+
         // Data Sample untuk Sekolah 2 (SMK Negeri 1 Balige)
         $guruBalige = User::updateOrCreate(
             ['email' => 'tulus@smkn1balige.sch.id'],
@@ -400,7 +406,7 @@ class DatabaseSeeder extends Seeder
         );
 
         $classBalige = Classroom::updateOrCreate(
-            ['code' => 'TKJ-1', 'school_id' => $school2->id],
+            ['school_id' => $school2->id, 'code' => 'TKJ-1'],
             [
                 'name' => 'Teknik Komputer & Jaringan - 1',
                 'homeroom_teacher_id' => $guruBalige->id,
@@ -422,5 +428,9 @@ class DatabaseSeeder extends Seeder
                 'school_id' => $school2->id,
             ]
         );
+
+        // Bahan ajar demo (dicari berdasarkan email/kode, tanpa ID hardcode).
+        // QuizSeeder sengaja tidak dipanggil di sini.
+        $this->call(LearningMaterialSeeder::class);
     }
 }

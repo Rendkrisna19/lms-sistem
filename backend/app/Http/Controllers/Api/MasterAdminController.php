@@ -7,7 +7,8 @@ use App\Models\School;
 use App\Models\User;
 use App\Models\Classroom;
 use App\Models\Course;
-use App\Models\QuizAttempt;
+use App\Support\AttemptStats;
+use App\Support\LearningAnalytics;
 use Illuminate\Http\Request;
 
 class MasterAdminController extends Controller
@@ -28,10 +29,8 @@ class MasterAdminController extends Controller
             ->orderBy('id', 'asc')
             ->get();
 
-        // Hitung rata-rata ujian nasional platform
-        $attempts = QuizAttempt::all();
-        $avgScore = $attempts->count() > 0 ? round($attempts->avg('score'), 1) : 88.5;
-        $passRate = $attempts->count() > 0 ? round(($attempts->where('is_passed', true)->count() / $attempts->count()) * 100, 1) : 94.0;
+        // Statistik ujian seluruh platform (hanya attempt yang sudah dikumpulkan)
+        $stats = AttemptStats::summarize();
 
         return response()->json([
             'status' => 'success',
@@ -41,15 +40,10 @@ class MasterAdminController extends Controller
                 'total_students' => $totalStudents,
                 'total_classrooms' => $totalClassrooms,
                 'total_courses' => $totalCourses,
-                'average_score' => $avgScore,
-                'pass_rate' => $passRate,
+                'total_exam_attempts' => $stats['total'],
+                'average_score' => $stats['average_score'],
+                'pass_rate' => $stats['pass_rate'],
                 'schools_distribution' => $schools,
-                'system_health' => [
-                    'status' => 'Optimal & Stabil',
-                    'database' => 'MySQL Multi-Tenant Isolasi Aktif',
-                    'latency_ms' => 24,
-                    'backup_status' => 'Tersinkronisasi',
-                ],
             ],
         ]);
     }
@@ -146,64 +140,25 @@ class MasterAdminController extends Controller
 
     /**
      * Analisis Akses Media & Gaya Belajar Siswa (Dokumen PDF vs Voice/Audio vs Video Tutorial)
+     * berdasarkan log akses bahan ajar. Filter opsional: school_id, classroom_id.
      */
     public function learningAnalytics(Request $request)
     {
-        $schoolId = $request->query('school_id');
+        $students = User::where('role', 'murid');
 
-        $studentsQuery = User::where('role', 'murid')->with(['school:id,name', 'classroom:id,name,code']);
+        $schoolId = $request->query('school_id');
         if ($schoolId && $schoolId !== 'all') {
-            $studentsQuery->where('school_id', $schoolId);
+            $students->where('school_id', $schoolId);
         }
 
-        $students = $studentsQuery->get();
-
-        // Data dummy analytics per siswa untuk analisis tipe gaya belajar
-        $analyticsList = $students->map(function ($student, $index) {
-            // Seed pola akses berdasarkan index siswa agar variatif dan konsisten
-            $seeds = [
-                ['pdf' => 38, 'audio' => 12, 'video' => 15, 'dominant' => 'Visual (Dokumen PDF)'],
-                ['pdf' => 14, 'audio' => 42, 'video' => 18, 'dominant' => 'Auditori (Audio Suara Guru)'],
-                ['pdf' => 10, 'audio' => 16, 'video' => 45, 'dominant' => 'Audiovisual (Video Tutorial HD)'],
-                ['pdf' => 28, 'audio' => 25, 'video' => 32, 'dominant' => 'Kinestetik / Multimodal'],
-            ];
-
-            $profile = $seeds[$index % count($seeds)];
-            $totalAccess = $profile['pdf'] + $profile['audio'] + $profile['video'];
-
-            return [
-                'id' => $student->id,
-                'name' => $student->name,
-                'nis' => $student->nomor_induk ?? $student->nim_nip,
-                'school_name' => $student->school?->name ?? 'SMA Mitra Inalum',
-                'classroom_name' => $student->classroom?->name ?? 'Teknik Informatika - A',
-                'pdf_access_count' => $profile['pdf'],
-                'audio_access_count' => $profile['audio'],
-                'video_access_count' => $profile['video'],
-                'total_access' => $totalAccess,
-                'dominant_style' => $profile['dominant'],
-                'learning_pace' => $profile['pdf'] > 30 ? 'Cepat Mandiri' : ($profile['video'] > 30 ? 'Konseptual Visual' : 'Pendengar Aktif'),
-            ];
-        });
-
-        // Summary persentase preferensi nasional
-        $totalPdf = $analyticsList->sum('pdf_access_count');
-        $totalAudio = $analyticsList->sum('audio_access_count');
-        $totalVideo = $analyticsList->sum('video_access_count');
-        $grandTotal = max($totalPdf + $totalAudio + $totalVideo, 1);
+        $classroomId = $request->query('classroom_id');
+        if ($classroomId && $classroomId !== 'all') {
+            $students->where('classroom_id', $classroomId);
+        }
 
         return response()->json([
             'status' => 'success',
-            'data' => [
-                'summary' => [
-                    'total_students_analyzed' => $analyticsList->count(),
-                    'pdf_percentage' => round(($totalPdf / $grandTotal) * 100, 1),
-                    'audio_percentage' => round(($totalAudio / $grandTotal) * 100, 1),
-                    'video_percentage' => round(($totalVideo / $grandTotal) * 100, 1),
-                    'total_media_interactions' => $grandTotal,
-                ],
-                'students' => $analyticsList,
-            ],
+            'data' => LearningAnalytics::build($students),
         ]);
     }
 }

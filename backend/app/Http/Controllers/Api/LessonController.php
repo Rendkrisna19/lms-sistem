@@ -3,64 +3,80 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Course;
-use App\Models\Classroom;
 use App\Models\ClassSubjectAssignment;
+use App\Models\Course;
 use App\Models\Lesson;
 use App\Models\LessonContent;
 use App\Models\StudentLessonProgress;
 use App\Models\User;
+use App\Support\MediaUpload;
+use App\Support\TeacherScope;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Collection;
+use Illuminate\Validation\Rule;
 
 class LessonController extends Controller
 {
+    /**
+     * Mapel yang boleh diakses pengguna:
+     * - murid       => mapel yang diplot ke kelasnya
+     * - guru        => mapel yang diajar (diplot) atau diampu sebagai instruktur
+     * - admin       => mapel di sekolahnya
+     * - admin_master => semua (null = tanpa batasan)
+     */
+    private function accessibleCourseIds(User $user): ?Collection
+    {
+        return match ($user->role) {
+            'murid' => $user->classroom_id
+                ? ClassSubjectAssignment::where('classroom_id', $user->classroom_id)->pluck('course_id')->unique()->values()
+                : collect(),
+            'guru' => TeacherScope::for($user)->courseIds,
+            'admin' => $user->school_id
+                ? Course::where('school_id', $user->school_id)->pluck('id')
+                : collect(),
+            'admin_master' => null,
+            default => collect(),
+        };
+    }
+
+    private function accessibleLessons(User $user)
+    {
+        $query = Lesson::query();
+        $courseIds = $this->accessibleCourseIds($user);
+        if ($courseIds !== null) {
+            $query->whereIn('course_id', $courseIds);
+        }
+
+        return $query;
+    }
+
     public function index(Request $request)
     {
         $user = $request->user();
-        $userId = $user ? $user->id : null;
-        $courseId = $request->query('course_id');
+        $isStudent = $user->role === 'murid';
 
-        $query = Lesson::with(['contents', 'quiz:id,lesson_id,title,duration_minutes,is_published'])
+        $query = $this->accessibleLessons($user)
+            ->with(['contents', 'quiz:id,lesson_id,title,duration_minutes,is_published'])
             ->orderBy('order_index');
 
-        if ($courseId) {
-            $query->where('course_id', $courseId);
-        } elseif ($user && $user->role === 'guru') {
-            // Guru hanya melihat materi dari mapel yang diampu
-            $assignedCourses = ClassSubjectAssignment::where('teacher_id', $user->id)->pluck('course_id')
-                ->merge(Course::where('instructor_id', $user->id)->pluck('id'))
-                ->unique()->filter()->values();
-            if ($assignedCourses->isNotEmpty()) {
-                $query->whereIn('course_id', $assignedCourses);
-            }
-        } elseif ($user && $user->role === 'murid' && $user->classroom_id) {
-            // Siswa hanya melihat materi dari kelasnya
-            $classCourses = ClassSubjectAssignment::where('classroom_id', $user->classroom_id)->pluck('course_id');
-            if ($classCourses->isNotEmpty()) {
-                $query->whereIn('course_id', $classCourses);
-            }
+        if ($request->filled('course_id')) {
+            $query->where('course_id', $request->query('course_id'));
         }
 
-        $lessons = $query->get()->map(function ($lesson) use ($userId) {
-            $isCompleted = false;
-            if ($userId) {
-                $prog = StudentLessonProgress::where('user_id', $userId)
-                    ->where('lesson_id', $lesson->id)
-                    ->first();
-                $isCompleted = $prog ? (bool)$prog->is_completed : false;
-            }
-            return [
-                'id' => $lesson->id,
-                'course_id' => $lesson->course_id,
-                'title' => $lesson->title,
-                'description' => $lesson->description,
-                'order_index' => $lesson->order_index,
-                'contents' => $lesson->contents,
-                'quiz' => $lesson->quiz,
-                'is_completed' => $isCompleted,
-            ];
-        });
+        if ($isStudent) {
+            $query->with(['progress' => fn ($q) => $q->where('user_id', $user->id)]);
+        }
+
+        $lessons = $query->get()->map(fn ($lesson) => [
+            'id' => $lesson->id,
+            'course_id' => $lesson->course_id,
+            'title' => $lesson->title,
+            'description' => $lesson->description,
+            'order_index' => $lesson->order_index,
+            'contents' => $lesson->contents,
+            'quiz' => $lesson->quiz,
+            'is_completed' => $isStudent ? (bool) $lesson->progress->first()?->is_completed : false,
+        ]);
 
         return response()->json([
             'status' => 'success',
@@ -70,15 +86,17 @@ class LessonController extends Controller
 
     public function show($id, Request $request)
     {
-        $userId = $request->user() ? $request->user()->id : null;
-        $lesson = Lesson::with(['contents', 'quiz'])->findOrFail($id);
+        $user = $request->user();
+        $lesson = $this->accessibleLessons($user)
+            ->with(['contents', 'quiz'])
+            ->findOrFail($id);
 
+        // Hanya siswa yang dicatat progres aksesnya
         $progress = null;
-        if ($userId) {
-            $progress = StudentLessonProgress::firstOrCreate(
-                ['user_id' => $userId, 'lesson_id' => $lesson->id],
-                ['last_accessed_at' => now()]
-            );
+        if ($user->role === 'murid') {
+            $progress = StudentLessonProgress::firstOrNew(['user_id' => $user->id, 'lesson_id' => $lesson->id]);
+            $progress->last_accessed_at = now();
+            $progress->save();
         }
 
         return response()->json([
@@ -92,18 +110,23 @@ class LessonController extends Controller
 
     public function store(Request $request)
     {
-        if ($request->user()->role !== 'guru') {
-            return response()->json(['message' => 'Hanya Guru/Dosen yang dapat menambah materi.'], 403);
-        }
+        $scope = TeacherScope::for($request->user());
 
         $validated = $request->validate([
-            'course_id' => 'required|exists:courses,id',
+            'course_id' => ['required', 'integer', Rule::in($scope->courseIds->all())],
             'title' => 'required|string|max:255',
             'description' => 'nullable|string',
-            'order_index' => 'nullable|integer',
+            'order_index' => 'nullable|integer|min:1',
+        ], [
+            'course_id.in' => 'Anda tidak mengampu mata pelajaran ini.',
         ]);
 
-        $lesson = Lesson::create($validated);
+        $lesson = Lesson::create([
+            'course_id' => $validated['course_id'],
+            'title' => $validated['title'],
+            'description' => $validated['description'] ?? null,
+            'order_index' => $validated['order_index'] ?? 1,
+        ]);
 
         return response()->json([
             'status' => 'success',
@@ -114,63 +137,53 @@ class LessonController extends Controller
 
     public function storeContent($lessonId, Request $request)
     {
-        if ($request->user()->role !== 'guru') {
-            return response()->json(['message' => 'Hanya Guru/Dosen yang dapat mengupload materi.'], 403);
-        }
-
-        $lesson = Lesson::findOrFail($lessonId);
+        $scope = TeacherScope::for($request->user());
+        $lesson = Lesson::whereIn('course_id', $scope->courseIds)->findOrFail($lessonId);
 
         $validated = $request->validate([
             'content_type' => 'required|in:document,audio,video',
             'title' => 'required|string|max:255',
-            'file' => 'nullable|file|max:102400', // 100MB
-            'external_url' => 'nullable|url',
+            'external_url' => 'nullable|url:http,https|max:500',
             'notes' => 'nullable|string',
+        ], [
+            'external_url.url' => 'Tautan URL tidak valid (harus diawali http:// atau https://).',
         ]);
 
-        $filePath = null;
-        $fileName = null;
-        $fileSize = null;
+        $contentType = $validated['content_type'];
+        $request->validate(
+            ['file' => MediaUpload::rules($contentType, 'required_without:external_url')],
+            MediaUpload::messages('file', $contentType)
+        );
 
-        if ($request->hasFile('file')) {
-            $file = $request->file('file');
-            $fileName = $file->getClientOriginalName();
-            $fileSize = $file->getSize();
-
-            $folder = match ($validated['content_type']) {
-                'document' => 'documents',
-                'audio' => 'audio',
-                'video' => 'videos',
-            };
-
-            $filePath = $file->store($folder, 'public');
-        }
+        $stored = $request->hasFile('file')
+            ? MediaUpload::store($request->file('file'), $contentType, 'lessons')
+            : null;
 
         $content = LessonContent::create([
             'lesson_id' => $lesson->id,
-            'content_type' => $validated['content_type'],
+            'content_type' => $contentType,
             'title' => $validated['title'],
-            'file_path' => $filePath,
-            'file_name_original' => $fileName,
-            'file_size_bytes' => $fileSize,
+            'file_path' => $stored['path'] ?? null,
+            'file_name_original' => $stored['original_name'] ?? null,
+            'file_size_bytes' => $stored['size'] ?? null,
             'external_url' => $validated['external_url'] ?? null,
             'notes' => $validated['notes'] ?? null,
         ]);
 
         return response()->json([
             'status' => 'success',
-            'message' => "Media pembelajaran {$validated['content_type']} berhasil diunggah.",
+            'message' => "Media pembelajaran {$contentType} berhasil diunggah.",
             'data' => $content,
         ], 201);
     }
 
     public function markProgress($id, Request $request)
     {
-        $userId = $request->user()->id;
-        $lesson = Lesson::findOrFail($id);
+        $user = $request->user();
+        $lesson = $this->accessibleLessons($user)->findOrFail($id);
 
         $progress = StudentLessonProgress::updateOrCreate(
-            ['user_id' => $userId, 'lesson_id' => $lesson->id],
+            ['user_id' => $user->id, 'lesson_id' => $lesson->id],
             [
                 'is_completed' => true,
                 'completed_at' => now(),
@@ -185,38 +198,49 @@ class LessonController extends Controller
         ]);
     }
 
+    /**
+     * Laporan progres belajar siswa pada mapel yang diajar guru di kelas masing-masing.
+     */
     public function teacherProgressReport(Request $request)
     {
-        $teacher = $request->user();
-        if (!$teacher || $teacher->role !== 'guru') {
-            $teacher = User::where('role', 'guru')->first() ?? $teacher;
-        }
-
-        // Dapatkan kelas yang diajar oleh guru ini
-        $classroomIds = ClassSubjectAssignment::where('teacher_id', $teacher->id)->pluck('classroom_id')
-            ->merge(Classroom::where('homeroom_teacher_id', $teacher->id)->pluck('id'))
-            ->unique()->filter()->values();
-
-        // Dapatkan mapel yang diampu oleh guru ini
-        $courseIds = ClassSubjectAssignment::where('teacher_id', $teacher->id)->pluck('course_id')
-            ->merge(Course::where('instructor_id', $teacher->id)->pluck('id'))
-            ->unique()->filter()->values();
+        $scope = TeacherScope::for($request->user());
+        $coursesByClassroom = $scope->courseIdsByClassroom();
 
         $students = User::where('role', 'murid')
-            ->whereIn('classroom_id', $classroomIds)
+            ->whereIn('classroom_id', $scope->classroomIds)
             ->with('classroom:id,name,code')
             ->orderBy('name')
             ->get();
 
-        $totalLessons = Lesson::whereIn('course_id', $courseIds)->count();
+        // Jumlah pertemuan per mapel (1 query)
+        $lessonsPerCourse = Lesson::whereIn('course_id', $scope->courseIds)
+            ->toBase()
+            ->select('course_id')
+            ->selectRaw('COUNT(*) as total')
+            ->groupBy('course_id')
+            ->pluck('total', 'course_id');
 
-        $report = $students->map(function ($student) use ($totalLessons, $courseIds) {
-            $completedCount = StudentLessonProgress::where('user_id', $student->id)
-                ->whereHas('lesson', fn($l) => $l->whereIn('course_id', $courseIds))
-                ->where('is_completed', true)
-                ->count();
+        // Jumlah pertemuan selesai per siswa per mapel (1 query)
+        $completed = StudentLessonProgress::query()
+            ->join('lessons', 'lessons.id', '=', 'student_lesson_progress.lesson_id')
+            ->whereIn('student_lesson_progress.user_id', $students->pluck('id'))
+            ->whereIn('lessons.course_id', $scope->courseIds)
+            ->where('student_lesson_progress.is_completed', true)
+            ->toBase()
+            ->select('student_lesson_progress.user_id', 'lessons.course_id')
+            ->selectRaw('COUNT(*) as total')
+            ->groupBy('student_lesson_progress.user_id', 'lessons.course_id')
+            ->get()
+            ->groupBy('user_id');
 
-            $percentage = $totalLessons > 0 ? round(($completedCount / $totalLessons) * 100) : 0;
+        $report = $students->map(function ($student) use ($coursesByClassroom, $scope, $lessonsPerCourse, $completed) {
+            // Mapel yang diajar guru di kelas siswa; kelas perwalian tanpa plotting memakai seluruh mapel guru
+            $courseIds = $coursesByClassroom->get($student->classroom_id, $scope->courseIds);
+
+            $totalLessons = $courseIds->sum(fn ($courseId) => (int) ($lessonsPerCourse[$courseId] ?? 0));
+            $completedCount = $completed->get($student->id, collect())
+                ->filter(fn ($row) => $courseIds->contains((int) $row->course_id))
+                ->sum(fn ($row) => (int) $row->total);
 
             return [
                 'id' => $student->id,
@@ -226,7 +250,7 @@ class LessonController extends Controller
                 'classroom_name' => $student->classroom?->name ?? 'Belum Ada Kelas',
                 'completed_lessons' => $completedCount,
                 'total_lessons' => $totalLessons,
-                'progress_percentage' => $percentage,
+                'progress_percentage' => $totalLessons > 0 ? (int) round(($completedCount / $totalLessons) * 100) : 0,
             ];
         });
 

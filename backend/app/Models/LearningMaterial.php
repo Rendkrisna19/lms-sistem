@@ -65,6 +65,22 @@ class LearningMaterial extends Model
         return $this->belongsTo(Lesson::class);
     }
 
+    public function accesses()
+    {
+        return $this->hasMany(MaterialAccess::class, 'learning_material_id');
+    }
+
+    /**
+     * Bahan ajar yang boleh dilihat siswa: aktif dan belum kedaluwarsa.
+     */
+    public function scopeAvailable($query)
+    {
+        return $query->where('is_active', true)
+            ->where(function ($q) {
+                $q->whereNull('expires_at')->orWhere('expires_at', '>=', now());
+            });
+    }
+
     public function getIsExpiredAttribute(): bool
     {
         if (!$this->expires_at) {

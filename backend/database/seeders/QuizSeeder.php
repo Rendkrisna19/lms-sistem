@@ -6,19 +6,48 @@ use Illuminate\Database\Seeder;
 use App\Models\Quiz;
 use App\Models\QuizQuestion;
 use App\Models\QuizOption;
+use App\Models\ClassSubjectAssignment;
+use App\Models\User;
 
 class QuizSeeder extends Seeder
 {
+    /**
+     * Ambil guru (berdasarkan NIP) beserta plotting kelas & mapel pertamanya.
+     * Mengembalikan null jika data master belum di-seed.
+     */
+    private function context(string $nip): ?array
+    {
+        $teacher = User::where('role', 'guru')->where('nomor_induk', $nip)->first();
+        $assignment = $teacher
+            ? ClassSubjectAssignment::where('teacher_id', $teacher->id)->orderBy('id')->first()
+            : null;
+
+        if (!$teacher || !$assignment) {
+            $this->command?->warn("QuizSeeder: guru {$nip} atau plotting kelasnya belum ada, dilewati.");
+            return null;
+        }
+
+        return [
+            'school_id' => $teacher->school_id,
+            'teacher_id' => $teacher->id,
+            'classroom_id' => $assignment->classroom_id,
+            'course_id' => $assignment->course_id,
+        ];
+    }
+
     public function run(): void
     {
-        // 1. Dr. Hendra Wijaya (ID 13, Class 1 TI-A, Course 7)
+        $hendra = $this->context('198803122014021002');
+        $ratna = $this->context('199104252018032001');
+        if (!$hendra || !$ratna) {
+            return;
+        }
+
+        // 1. Dr. Hendra Wijaya
         $q1 = Quiz::updateOrCreate(
             ['title' => 'Kuis Evaluasi 01: Normalisasi & Skema Relasional DBMS'],
             [
-                'school_id' => 1,
-                'teacher_id' => 13,
-                'classroom_id' => 1,
-                'course_id' => 7,
+                ...$hendra,
                 'instructions' => "Petunjuk Pengerjaan:\n1. Kuis terdiri dari 4 butir soal pilihan ganda.\n2. Waktu pengerjaan adalah 45 menit terhitung sejak menekan tombol mulai.\n3. Nilai KKM kelulusan adalah 75.",
                 'duration_minutes' => 45,
                 'passing_score' => 75,
@@ -113,10 +142,7 @@ class QuizSeeder extends Seeder
         Quiz::updateOrCreate(
             ['title' => 'Ujian Tengah Semester (UTS): Perancangan Basis Data Lanjutan'],
             [
-                'school_id' => 1,
-                'teacher_id' => 13,
-                'classroom_id' => 1,
-                'course_id' => 7,
+                ...$hendra,
                 'instructions' => "UTS Resmi Semester Ganjil. Pastikan koneksi internet stabil sebelum menekan tombol mulai ujian.",
                 'duration_minutes' => 90,
                 'passing_score' => 75,
@@ -128,14 +154,11 @@ class QuizSeeder extends Seeder
             ]
         );
 
-        // 2. Ratna Sari (ID 14, Class 2 TI-B, Course 8)
+        // 2. Ratna Sari
         $qRatna = Quiz::updateOrCreate(
             ['title' => 'Kuis 01: Metodologi Agile Scrum & Manajemen Sprint Backlog'],
             [
-                'school_id' => 1,
-                'teacher_id' => 14,
-                'classroom_id' => 2,
-                'course_id' => 8,
+                ...$ratna,
                 'instructions' => "Kuis evaluasi sprint planning & peran scrum team. Waktu pengerjaan 30 menit. KKM: 70.",
                 'duration_minutes' => 30,
                 'passing_score' => 70,

@@ -3,55 +3,29 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\LearningMaterial;
 use App\Models\ClassSubjectAssignment;
-use App\Models\Classroom;
-use App\Models\Course;
-use App\Models\User;
+use App\Models\LearningMaterial;
+use App\Models\MaterialAccess;
+use App\Support\MediaUpload;
+use App\Support\TeacherScope;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
-use Carbon\Carbon;
+use Illuminate\Validation\ValidationException;
 
 class TeacherMaterialController extends Controller
 {
-    /**
-     * Resolves active teacher from X-Teacher-Id header, query param, or auth user.
-     */
-    private function resolveTeacher(Request $request): ?User
-    {
-        $teacher = null;
-        if ($request->hasHeader('X-Teacher-Id')) {
-            $teacher = User::find($request->header('X-Teacher-Id'));
-        }
-        if (!$teacher && $request->has('teacher_id')) {
-            $teacher = User::find($request->input('teacher_id'));
-        }
-        if (!$teacher && $request->user()) {
-            $teacher = $request->user();
-        }
-        if (!$teacher || $teacher->role !== 'guru') {
-            $teacher = User::where('role', 'guru')->first();
-        }
-        return $teacher;
-    }
+    /** Jeda minimum antar pencatatan akses materi yang sama oleh siswa yang sama */
+    private const ACCESS_THROTTLE_MINUTES = 5;
 
     /**
      * Daftar bahan ajar yang diunggah oleh guru (lengkap dengan filter & statistik)
      */
     public function index(Request $request)
     {
-        $teacher = $this->resolveTeacher($request);
-        if (!$teacher) {
-            return response()->json(['status' => 'error', 'message' => 'Guru tidak ditemukan.'], 404);
-        }
+        $teacher = $request->user();
 
-        // Ambil plotting mapel guru ini
-        $assignments = ClassSubjectAssignment::where('teacher_id', $teacher->id)
-            ->with(['classroom:id,name,code', 'course:id,title'])
-            ->get();
-
-        $assignedClassroomIds = $assignments->pluck('classroom_id')->unique()->values();
-        $assignedCourseIds = $assignments->pluck('course_id')->unique()->values();
+        $assignments = $this->teacherAssignments($teacher->id);
 
         $query = LearningMaterial::where('teacher_id', $teacher->id)
             ->with(['classroom:id,name,code', 'course:id,title']);
@@ -93,16 +67,18 @@ class TeacherMaterialController extends Controller
 
         $materials = $query->orderBy('id', 'desc')->get();
 
-        // Hitung statistik keseluruhan materi milik guru ini
-        $allTeacherMaterials = LearningMaterial::where('teacher_id', $teacher->id)->get();
-        $summary = [
-            'total' => $allTeacherMaterials->count(),
-            'total_document' => $allTeacherMaterials->where('content_type', 'document')->count(),
-            'total_audio' => $allTeacherMaterials->where('content_type', 'audio')->count(),
-            'total_video' => $allTeacherMaterials->where('content_type', 'video')->count(),
-            'total_active' => $allTeacherMaterials->where('is_active', true)->count(),
-            'total_inactive' => $allTeacherMaterials->where('is_active', false)->count(),
-        ];
+        // Statistik keseluruhan materi milik guru ini (satu query agregat)
+        $summaryRow = LearningMaterial::where('teacher_id', $teacher->id)
+            ->toBase()
+            ->selectRaw('COUNT(*) as total')
+            ->selectRaw("SUM(CASE WHEN content_type = 'document' THEN 1 ELSE 0 END) as total_document")
+            ->selectRaw("SUM(CASE WHEN content_type = 'audio' THEN 1 ELSE 0 END) as total_audio")
+            ->selectRaw("SUM(CASE WHEN content_type = 'video' THEN 1 ELSE 0 END) as total_video")
+            ->selectRaw('SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as total_active')
+            ->first();
+
+        $total = (int) ($summaryRow->total ?? 0);
+        $active = (int) ($summaryRow->total_active ?? 0);
 
         return response()->json([
             'status' => 'success',
@@ -112,16 +88,23 @@ class TeacherMaterialController extends Controller
                     'name' => $teacher->name,
                     'nip' => $teacher->nomor_induk ?? $teacher->nim_nip,
                 ],
-                'summary' => $summary,
+                'summary' => [
+                    'total' => $total,
+                    'total_document' => (int) ($summaryRow->total_document ?? 0),
+                    'total_audio' => (int) ($summaryRow->total_audio ?? 0),
+                    'total_video' => (int) ($summaryRow->total_video ?? 0),
+                    'total_active' => $active,
+                    'total_inactive' => $total - $active,
+                ],
                 'materials' => $materials,
-                'assigned_options' => $assignments->map(fn($a) => [
+                'assigned_options' => $assignments->map(fn ($a) => [
                     'assignment_id' => $a->id,
                     'classroom_id' => $a->classroom_id,
                     'classroom_name' => $a->classroom?->name,
                     'classroom_code' => $a->classroom?->code,
                     'course_id' => $a->course_id,
                     'course_title' => $a->course?->title,
-                    'schedule' => "{$a->schedule_day}, {$a->schedule_time}",
+                    'schedule' => trim(implode(', ', array_filter([$a->schedule_day, $a->schedule_time]))) ?: null,
                     'room' => $a->room,
                 ]),
             ],
@@ -133,18 +116,11 @@ class TeacherMaterialController extends Controller
      */
     public function getOptions(Request $request)
     {
-        $teacher = $this->resolveTeacher($request);
-        if (!$teacher) {
-            return response()->json(['status' => 'error', 'message' => 'Guru tidak ditemukan.'], 404);
-        }
-
-        $assignments = ClassSubjectAssignment::where('teacher_id', $teacher->id)
-            ->with(['classroom:id,name,code', 'course:id,title'])
-            ->get();
+        $assignments = $this->teacherAssignments($request->user()->id);
 
         return response()->json([
             'status' => 'success',
-            'data' => $assignments->map(fn($a) => [
+            'data' => $assignments->map(fn ($a) => [
                 'classroom_id' => $a->classroom_id,
                 'classroom_name' => $a->classroom?->name,
                 'classroom_code' => $a->classroom?->code,
@@ -160,135 +136,67 @@ class TeacherMaterialController extends Controller
      */
     public function store(Request $request)
     {
-        $teacher = $this->resolveTeacher($request);
-        if (!$teacher) {
-            return response()->json(['status' => 'error', 'message' => 'Guru tidak terverifikasi.'], 403);
-        }
+        $teacher = $request->user();
 
         $validated = $request->validate([
-            'classroom_id' => 'required|exists:classrooms,id',
-            'course_id' => 'required|exists:courses,id',
+            'classroom_id' => 'required|integer',
+            'course_id' => 'required|integer',
             'title' => 'required|string|max:255',
             'description' => 'nullable|string',
             'content_type' => 'required|in:document,audio,video',
-            'video_source_type' => 'nullable|in:upload,youtube,google_drive',
+            'video_source_type' => 'nullable|required_if:content_type,video|in:upload,youtube,google_drive',
             'is_active' => 'nullable',
             'expires_at' => 'nullable|date',
-            'external_url' => 'nullable|url',
+            'external_url' => 'nullable|url:http,https|max:500',
+        ], [
+            'video_source_type.required_if' => 'Pilih sumber video: Upload Video Asli, Link YouTube, atau Link Google Drive.',
+            'external_url.url' => 'Tautan URL tidak valid (harus diawali http:// atau https://).',
         ]);
 
+        // Guru hanya boleh mengunggah ke kelas + mapel yang diplotkan kepadanya
+        if (!TeacherScope::for($teacher)->hasAssignment($validated['classroom_id'], $validated['course_id'])) {
+            throw ValidationException::withMessages([
+                'classroom_id' => ['Anda tidak ditugaskan mengajar mata pelajaran ini di kelas tersebut.'],
+            ]);
+        }
+
         $contentType = $validated['content_type'];
-        $filePath = null;
-        $fileNameOriginal = null;
-        $fileSizeBytes = null;
+        $videoSourceType = $contentType === 'video' ? $validated['video_source_type'] : null;
         $externalUrl = $validated['external_url'] ?? null;
-        $videoSourceType = $validated['video_source_type'] ?? null;
 
-        // 1. Validasi Spesifik Dokumen PDF (Maksimal 20 MB)
-        if ($contentType === 'document') {
-            if ($request->hasFile('file')) {
-                $file = $request->file('file');
-                $ext = strtolower($file->getClientOriginalExtension());
-                if ($ext !== 'pdf') {
-                    return response()->json([
-                        'status' => 'error',
-                        'message' => 'Format file dokumen wajib berupa berkas PDF (.pdf).'
-                    ], 422);
-                }
+        // Tentukan apakah berkas wajib / opsional, lalu validasi berdasarkan MIME sebenarnya
+        $needsFile = match ($contentType) {
+            'video' => $videoSourceType === 'upload',
+            default => true,
+        };
 
-                // Cek ukuran max 20MB (20971520 bytes)
-                if ($file->getSize() > 20971520) {
-                    return response()->json([
-                        'status' => 'error',
-                        'message' => 'Ukuran berkas PDF melebihi batas maksimal 20 MB.'
-                    ], 422);
-                }
+        if ($contentType === 'video' && $videoSourceType !== 'upload') {
+            if (empty($externalUrl)) {
+                throw ValidationException::withMessages([
+                    'external_url' => ['Tautan URL ' . ($videoSourceType === 'youtube' ? 'YouTube' : 'Google Drive') . ' wajib diisi.'],
+                ]);
+            }
+        } elseif ($needsFile) {
+            // Dokumen & audio boleh berupa tautan eksternal sebagai pengganti berkas
+            $presence = $contentType === 'video' ? 'required' : 'required_without:external_url';
+            $request->validate(
+                ['file' => MediaUpload::rules($contentType, $presence)],
+                MediaUpload::messages('file', $contentType)
+            );
+        }
 
-                $fileNameOriginal = $file->getClientOriginalName();
-                $fileSizeBytes = $file->getSize();
-                $filePath = $file->store('materials/documents', 'public');
-            } elseif (empty($externalUrl)) {
-                return response()->json([
-                    'status' => 'error',
-                    'message' => 'Berkas PDF wajib diunggah.'
-                ], 422);
+        $stored = null;
+        if ($needsFile && $request->hasFile('file')) {
+            $stored = MediaUpload::store($request->file('file'), $contentType, 'materials');
+            if ($contentType === 'video') {
+                $externalUrl = null;
             }
         }
 
-        // 2. Validasi Spesifik Audio Suara / Podcast (Maksimal 20 MB)
-        if ($contentType === 'audio') {
-            if ($request->hasFile('file')) {
-                $file = $request->file('file');
-                $ext = strtolower($file->getClientOriginalExtension());
-                $allowedAudioExt = ['mp3', 'wav', 'ogg', 'm4a', 'aac', 'wma'];
-                if (!in_array($ext, $allowedAudioExt)) {
-                    return response()->json([
-                        'status' => 'error',
-                        'message' => 'Format file audio wajib berupa MP3, WAV, M4A, atau OGG.'
-                    ], 422);
-                }
-
-                // Cek ukuran max 20MB (20971520 bytes)
-                if ($file->getSize() > 20971520) {
-                    return response()->json([
-                        'status' => 'error',
-                        'message' => 'Ukuran berkas Audio melebihi batas maksimal 20 MB.'
-                    ], 422);
-                }
-
-                $fileNameOriginal = $file->getClientOriginalName();
-                $fileSizeBytes = $file->getSize();
-                $filePath = $file->store('materials/audio', 'public');
-            } elseif (empty($externalUrl)) {
-                return response()->json([
-                    'status' => 'error',
-                    'message' => 'Berkas rekaman audio wajib diunggah.'
-                ], 422);
-            }
-        }
-
-        // 3. Validasi Spesifik Video (Upload Video Asli, Link YouTube, Link Google Drive)
-        if ($contentType === 'video') {
-            if ($videoSourceType === 'upload') {
-                if (!$request->hasFile('file')) {
-                    return response()->json([
-                        'status' => 'error',
-                        'message' => 'Berkas video asli wajib diunggah ketika memilih opsi Upload Video Asli.'
-                    ], 422);
-                }
-                $file = $request->file('file');
-                $ext = strtolower($file->getClientOriginalExtension());
-                $allowedVideoExt = ['mp4', 'webm', 'mov', 'mkv', 'avi'];
-                if (!in_array($ext, $allowedVideoExt)) {
-                    return response()->json([
-                        'status' => 'error',
-                        'message' => 'Format video wajib berupa MP4, WEBM, atau MOV.'
-                    ], 422);
-                }
-
-                $fileNameOriginal = $file->getClientOriginalName();
-                $fileSizeBytes = $file->getSize();
-                $filePath = $file->store('materials/videos', 'public');
-            } elseif ($videoSourceType === 'youtube' || $videoSourceType === 'google_drive') {
-                if (empty($externalUrl)) {
-                    return response()->json([
-                        'status' => 'error',
-                        'message' => 'Tautan URL ' . ($videoSourceType === 'youtube' ? 'YouTube' : 'Google Drive') . ' wajib diisi.'
-                    ], 422);
-                }
-            } else {
-                return response()->json([
-                    'status' => 'error',
-                    'message' => 'Pilih sumber video: Upload Video Asli, Link YouTube, atau Link Google Drive.'
-                ], 422);
-            }
-        }
-
-        $isActive = filter_var($request->input('is_active', true), FILTER_VALIDATE_BOOLEAN);
-        $expiresAt = !empty($request->input('expires_at')) ? Carbon::parse($request->input('expires_at')) : null;
+        $expiresAt = !empty($validated['expires_at']) ? Carbon::parse($validated['expires_at']) : null;
 
         $material = LearningMaterial::create([
-            'school_id' => $teacher->school_id ?? 1,
+            'school_id' => $teacher->school_id,
             'teacher_id' => $teacher->id,
             'classroom_id' => $validated['classroom_id'],
             'course_id' => $validated['course_id'],
@@ -296,11 +204,11 @@ class TeacherMaterialController extends Controller
             'description' => $validated['description'] ?? null,
             'content_type' => $contentType,
             'video_source_type' => $videoSourceType,
-            'file_path' => $filePath,
-            'file_name_original' => $fileNameOriginal,
-            'file_size_bytes' => $fileSizeBytes,
+            'file_path' => $stored['path'] ?? null,
+            'file_name_original' => $stored['original_name'] ?? null,
+            'file_size_bytes' => $stored['size'] ?? null,
             'external_url' => $externalUrl,
-            'is_active' => $isActive,
+            'is_active' => $request->boolean('is_active', true),
             'expires_at' => $expiresAt,
         ]);
 
@@ -318,12 +226,7 @@ class TeacherMaterialController extends Controller
      */
     public function toggleStatus(Request $request, $id)
     {
-        $teacher = $this->resolveTeacher($request);
-        $material = LearningMaterial::findOrFail($id);
-
-        if ($teacher && $material->teacher_id !== $teacher->id && $teacher->role === 'guru') {
-            return response()->json(['status' => 'error', 'message' => 'Anda tidak memiliki hak akses bahan ajar ini.'], 403);
-        }
+        $material = $this->ownMaterial($request, $id);
 
         $material->is_active = !$material->is_active;
         $material->save();
@@ -343,12 +246,7 @@ class TeacherMaterialController extends Controller
      */
     public function destroy(Request $request, $id)
     {
-        $teacher = $this->resolveTeacher($request);
-        $material = LearningMaterial::findOrFail($id);
-
-        if ($teacher && $material->teacher_id !== $teacher->id && $teacher->role === 'guru') {
-            return response()->json(['status' => 'error', 'message' => 'Anda tidak memiliki hak akses untuk menghapus bahan ajar ini.'], 403);
-        }
+        $material = $this->ownMaterial($request, $id);
 
         if ($material->file_path && Storage::disk('public')->exists($material->file_path)) {
             Storage::disk('public')->delete($material->file_path);
@@ -369,12 +267,9 @@ class TeacherMaterialController extends Controller
      */
     public function studentMaterials(Request $request)
     {
-        $student = $request->user();
-        if (!$student || $student->role !== 'murid') {
-            $student = User::where('role', 'murid')->first();
-        }
+        $student = $request->user()->load('classroom:id,name,code');
 
-        if (!$student || !$student->classroom_id) {
+        if (!$student->classroom) {
             return response()->json([
                 'status' => 'success',
                 'data' => [
@@ -384,14 +279,8 @@ class TeacherMaterialController extends Controller
             ]);
         }
 
-        $classroom = Classroom::find($student->classroom_id);
-
         $query = LearningMaterial::where('classroom_id', $student->classroom_id)
-            ->where('is_active', true)
-            ->where(function ($q) {
-                $q->whereNull('expires_at')
-                  ->orWhere('expires_at', '>=', now());
-            })
+            ->available()
             ->with(['course:id,title', 'teacher:id,name']);
 
         if ($request->filled('content_type') && $request->content_type !== 'all') {
@@ -408,12 +297,58 @@ class TeacherMaterialController extends Controller
             'status' => 'success',
             'data' => [
                 'classroom' => [
-                    'id' => $classroom?->id,
-                    'name' => $classroom?->name,
-                    'code' => $classroom?->code,
+                    'id' => $student->classroom->id,
+                    'name' => $student->classroom->name,
+                    'code' => $student->classroom->code,
                 ],
                 'materials' => $materials,
             ],
         ]);
+    }
+
+    /**
+     * Catat akses siswa terhadap bahan ajar (dasar analitik gaya belajar).
+     * Akses berulang pada materi yang sama dalam 5 menit tidak dicatat ulang.
+     */
+    public function recordAccess(Request $request, $id)
+    {
+        $student = $request->user();
+
+        $material = LearningMaterial::whereKey($id)
+            ->whereNotNull('classroom_id')
+            ->where('classroom_id', $student->classroom_id)
+            ->available()
+            ->firstOrFail();
+
+        $recentlyLogged = MaterialAccess::where('user_id', $student->id)
+            ->where('learning_material_id', $material->id)
+            ->where('accessed_at', '>=', now()->subMinutes(self::ACCESS_THROTTLE_MINUTES))
+            ->exists();
+
+        if (!$recentlyLogged) {
+            MaterialAccess::create([
+                'user_id' => $student->id,
+                'learning_material_id' => $material->id,
+                'content_type' => $material->content_type,
+                'accessed_at' => now(),
+            ]);
+        }
+
+        return response()->json(['status' => 'success']);
+    }
+
+    private function teacherAssignments(int $teacherId)
+    {
+        return ClassSubjectAssignment::where('teacher_id', $teacherId)
+            ->with(['classroom:id,name,code', 'course:id,title'])
+            ->get();
+    }
+
+    /**
+     * Bahan ajar milik guru yang sedang login; selain itu 404.
+     */
+    private function ownMaterial(Request $request, $id): LearningMaterial
+    {
+        return LearningMaterial::where('teacher_id', $request->user()->id)->findOrFail($id);
     }
 }

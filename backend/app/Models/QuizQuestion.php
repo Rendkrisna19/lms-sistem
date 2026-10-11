@@ -25,7 +25,7 @@ class QuizQuestion extends Model
 
     public function options()
     {
-        return $this->hasMany(QuizOption::class);
+        return $this->hasMany(QuizOption::class, 'question_id')->orderBy('option_label');
     }
 
     public function answers()

@@ -1,14 +1,22 @@
 import React, { useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { User, Lock, Eye, EyeOff, GraduationCap, Crown, ShieldCheck, FileText, Volume2, Video, Building2, AlertCircle } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
-import { api } from "../lib/api";
+import { useAuth } from "../lib/auth";
 import { cn } from "../lib/utils";
 import { toast } from "sonner";
 
-export function LoginPage({ onLoginSuccess }) {
-  const [nomorIndukInput, setNomorIndukInput] = useState("198507152010122001");
-  const [passwordInput, setPasswordInput] = useState("password123");
+// Tombol isi-otomatis akun demo hanya untuk pengembangan lokal (VITE_SHOW_DEMO_ACCOUNTS=true)
+const SHOW_DEMO_ACCOUNTS = import.meta.env.VITE_SHOW_DEMO_ACCOUNTS === "true";
+const DEMO_PASSWORD = import.meta.env.VITE_DEMO_PASSWORD || "";
+
+export function LoginPage() {
+  const { login } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [nomorIndukInput, setNomorIndukInput] = useState("");
+  const [passwordInput, setPasswordInput] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -61,21 +69,9 @@ export function LoginPage({ onLoginSuccess }) {
 
     setIsSubmitting(true);
     try {
-      // Real API Call to Laravel Sanctum Backend
-      const response = await api.post("/login", {
-        nomor_induk: trimmedId,
-        password: passwordInput,
-      });
-
-      const { user, token } = response.data.data;
-
-      // 7-Day Persistent Session Storage
-      localStorage.setItem("lms_token", token);
-      localStorage.setItem("lms_user", JSON.stringify(user));
-      localStorage.setItem("lms_login_time", Date.now().toString());
-
+      const user = await login(trimmedId, passwordInput);
       toast.success(`Selamat datang kembali, ${user.name}!`);
-      onLoginSuccess(user, token);
+      navigate(location.state?.from || "/dashboard", { replace: true });
     } catch (err) {
       const respErrors = err.response?.data?.errors;
       const respMsg = err.response?.data?.message;
@@ -103,7 +99,7 @@ export function LoginPage({ onLoginSuccess }) {
 
   const handleFillDemo = (nomorInduk, label) => {
     setNomorIndukInput(nomorInduk);
-    setPasswordInput("password123");
+    setPasswordInput(DEMO_PASSWORD);
     setFieldErrors({ nomor_induk: null, password: null });
     setGeneralError(null);
     toast.info(`Mengisi kredensial demo ${label}: ${nomorInduk}`);
@@ -273,7 +269,8 @@ export function LoginPage({ onLoginSuccess }) {
               </Button>
             </form>
 
-            {/* Quick Demo Helper Buttons */}
+            {/* Quick Demo Helper Buttons (hanya mode pengembangan) */}
+            {SHOW_DEMO_ACCOUNTS && (
             <div className="mt-8 pt-5 border-t border-slate-100 flex flex-wrap items-center justify-center gap-2 text-xs text-slate-500">
               <span className="font-medium text-slate-400">Akun Uji Coba:</span>
               <button
@@ -317,6 +314,7 @@ export function LoginPage({ onLoginSuccess }) {
                 <span>Siswa</span>
               </button>
             </div>
+            )}
           </div>
         </div>
       </div>

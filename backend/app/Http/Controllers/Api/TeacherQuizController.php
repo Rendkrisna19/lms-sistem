@@ -3,496 +3,465 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Quiz;
-use App\Models\QuizQuestion;
-use App\Models\QuizOption;
-use App\Models\QuizAttempt;
+use App\Http\Requests\SaveQuizRequest;
 use App\Models\ClassSubjectAssignment;
-use App\Models\Classroom;
-use App\Models\Course;
+use App\Models\Quiz;
+use App\Models\QuizAnswer;
+use App\Models\QuizAttempt;
 use App\Models\User;
+use App\Support\QuizQuestionSync;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Storage;
-use Carbon\Carbon;
+use Illuminate\Support\Str;
 
 class TeacherQuizController extends Controller
 {
-    /**
-     * Resolves active teacher from header, input param, or auth user.
-     */
-    private function resolveTeacher(Request $request): ?User
+    public function __construct(private QuizQuestionSync $questionSync)
     {
-        $teacher = null;
-        if ($request->hasHeader('X-Teacher-Id')) {
-            $teacher = User::find($request->header('X-Teacher-Id'));
-        }
-        if (!$teacher && $request->has('teacher_id')) {
-            $teacher = User::find($request->input('teacher_id'));
-        }
-        if (!$teacher && $request->user()) {
-            $teacher = $request->user();
-        }
-        if (!$teacher || $teacher->role !== 'guru') {
-            $teacher = User::where('role', 'guru')->first();
-        }
-        return $teacher;
     }
 
     /**
-     * Daftar ujian & kuis yang dikelola guru (lengkap dengan filter & ringkasan metrik)
+     * Daftar ujian milik guru yang login beserta ringkasan metrik.
      */
     public function index(Request $request)
     {
-        $teacher = $this->resolveTeacher($request);
-        if (!$teacher) {
-            return response()->json(['status' => 'error', 'message' => 'Guru tidak ditemukan.'], 404);
-        }
+        $teacher = $request->user();
 
-        // Ambil plotting mapel guru ini
-        $assignments = ClassSubjectAssignment::where('teacher_id', $teacher->id)
+        $quizzes = Quiz::where('teacher_id', $teacher->id)
             ->with(['classroom:id,name,code', 'course:id,title'])
-            ->get();
-
-        $assignedClassroomIds = $assignments->pluck('classroom_id')->unique()->values();
-        $assignedCourseIds = $assignments->pluck('course_id')->unique()->values();
-
-        $query = Quiz::where('teacher_id', $teacher->id)
-            ->with([
-                'classroom:id,name,code',
-                'course:id,title',
-                'questions:id,quiz_id,points',
-                'attempts:id,quiz_id,user_id,score,status',
-            ]);
-
-
-        // Filter per Kelas
-        if ($request->filled('classroom_id') && $request->classroom_id !== 'all') {
-            $query->where('classroom_id', $request->classroom_id);
-        }
-
-        // Filter per Mapel
-        if ($request->filled('course_id') && $request->course_id !== 'all') {
-            $query->where('course_id', $request->course_id);
-        }
-
-        // Filter per Status
-        if ($request->filled('status') && $request->status !== 'all') {
-            $status = $request->status;
-            if ($status === 'active') {
-                $query->where('is_active', true)
-                      ->where(function ($q) {
-                          $q->whereNull('starts_at')->orWhere('starts_at', '<=', now());
-                      })
-                      ->where(function ($q) {
-                          $q->whereNull('ends_at')->orWhere('ends_at', '>=', now());
-                      });
-            } elseif ($status === 'inactive') {
-                $query->where('is_active', false);
-            } elseif ($status === 'upcoming') {
-                $query->where('is_active', true)->whereNotNull('starts_at')->where('starts_at', '>', now());
-            } elseif ($status === 'closed') {
-                $query->where('is_active', true)->whereNotNull('ends_at')->where('ends_at', '<', now());
-            }
-        }
-
-        // Pencarian Judul / Instruksi
-        if ($request->filled('search')) {
-            $search = $request->search;
-            $query->where(function ($q) use ($search) {
-                $q->where('title', 'like', "%{$search}%")
-                  ->orWhere('instructions', 'like', "%{$search}%");
-            });
-        }
-
-        $quizzes = $query->orderBy('id', 'desc')->get()->map(function ($q) {
-            $attemptsCount = $q->attempts->count();
-            $avgScore = $attemptsCount > 0 ? round($q->attempts->avg('score'), 1) : 0;
-            $passedCount = $q->attempts->filter(fn($a) => $a->score >= $q->passing_score)->count();
-
-            return [
-                'id' => $q->id,
-                'title' => $q->title,
-                'instructions' => $q->instructions,
-                'classroom_id' => $q->classroom_id,
-                'classroom' => $q->classroom,
-                'course_id' => $q->course_id,
-                'course' => $q->course,
-                'duration_minutes' => $q->duration_minutes,
-                'passing_score' => $q->passing_score,
-                'starts_at' => $q->starts_at ? $q->starts_at->toISOString() : null,
-                'ends_at' => $q->ends_at ? $q->ends_at->toISOString() : null,
-                'is_active' => (bool)$q->is_active,
-                'status_state' => $q->status_state,
-                'total_questions' => $q->questions->count(),
-                'total_points' => $q->questions->sum('points'),
-                'total_attempts' => $attemptsCount,
-                'average_score' => $avgScore,
-                'pass_rate_percentage' => $attemptsCount > 0 ? round(($passedCount / $attemptsCount) * 100) : 0,
-                'created_at' => $q->created_at->toISOString(),
-            ];
-        });
-
-        // Hitung statistik keseluruhan ujian milik guru ini
-        $allTeacherQuizzes = Quiz::where('teacher_id', $teacher->id)
-            ->with('questions:id,quiz_id', 'attempts:id,quiz_id')
-            ->get();
-
+            ->withCount([
+                'questions',
+                'attempts as finished_attempts_count' => fn ($q) => $q->where('status', '!=', 'in_progress'),
+                'attempts as passed_attempts_count' => fn ($q) => $q->where('status', '!=', 'in_progress')
+                    ->whereColumn('quiz_attempts.score', '>=', 'quizzes.passing_score'),
+            ])
+            ->withSum('questions as total_points', 'points')
+            ->withAvg(['attempts as average_score' => fn ($q) => $q->where('status', '!=', 'in_progress')], 'score')
+            ->orderByDesc('id')
+            ->get()
+            ->map(fn (Quiz $quiz) => $this->formatListItem($quiz));
 
         $summary = [
-            'total' => $allTeacherQuizzes->count(),
-            'total_active' => $allTeacherQuizzes->filter(fn($q) => $q->status_state === 'active')->count(),
-            'total_inactive' => $allTeacherQuizzes->filter(fn($q) => $q->status_state === 'inactive')->count(),
-            'total_upcoming' => $allTeacherQuizzes->filter(fn($q) => $q->status_state === 'upcoming')->count(),
-            'total_closed' => $allTeacherQuizzes->filter(fn($q) => $q->status_state === 'closed')->count(),
-            'total_questions' => $allTeacherQuizzes->sum(fn($q) => $q->questions->count()),
-            'total_attempts' => $allTeacherQuizzes->sum(fn($q) => $q->attempts->count()),
+            'total' => $quizzes->count(),
+            'total_active' => $quizzes->where('status_state', 'active')->count(),
+            'total_inactive' => $quizzes->where('status_state', 'inactive')->count(),
+            'total_upcoming' => $quizzes->where('status_state', 'upcoming')->count(),
+            'total_closed' => $quizzes->where('status_state', 'closed')->count(),
+            'total_questions' => $quizzes->sum('total_questions'),
+            'total_attempts' => $quizzes->sum('total_attempts'),
         ];
 
         return response()->json([
             'status' => 'success',
             'data' => [
-                'teacher' => [
-                    'id' => $teacher->id,
-                    'name' => $teacher->name,
-                    'nip' => $teacher->nomor_induk ?? $teacher->nim_nip,
-                ],
                 'summary' => $summary,
-                'quizzes' => $quizzes,
-                'assigned_options' => $assignments->map(fn($a) => [
-                    'assignment_id' => $a->id,
-                    'classroom_id' => $a->classroom_id,
-                    'classroom_name' => $a->classroom?->name,
-                    'classroom_code' => $a->classroom?->code,
-                    'course_id' => $a->course_id,
-                    'course_title' => $a->course?->title,
-                    'label' => "{$a->classroom?->name} ({$a->classroom?->code}) - {$a->course?->title}",
-                ]),
+                'quizzes' => $quizzes->values(),
+                'assigned_options' => $this->assignedOptions($teacher->id),
             ],
         ]);
     }
 
     /**
-     * Detail satu ujian lengkap dengan butir soal & opsi kunci jawaban
+     * Pilihan kelas & mapel (plotting) yang boleh dipakai guru saat membuat ujian.
      */
-    public function show($id, Request $request)
+    public function options(Request $request)
     {
-        $teacher = $this->resolveTeacher($request);
-        $quiz = Quiz::with([
-            'classroom:id,name,code',
-            'course:id,title',
-            'questions.options',
-            'attempts.user:id,name,nomor_induk,nim_nip',
-        ])->findOrFail($id);
+        return response()->json([
+            'status' => 'success',
+            'data' => [
+                'assigned_options' => $this->assignedOptions($request->user()->id),
+                'limits' => [
+                    'min_options' => SaveQuizRequest::MIN_OPTIONS,
+                    'max_options' => SaveQuizRequest::MAX_OPTIONS,
+                ],
+            ],
+        ]);
+    }
+
+    /**
+     * Detail satu ujian lengkap dengan butir soal & kunci jawaban (khusus pemilik).
+     */
+    public function show(Request $request, $id)
+    {
+        $quiz = $this->ownQuiz($request, $id)
+            ->load(['classroom:id,name,code', 'course:id,title', 'questions.options'])
+            ->loadCount([
+                'attempts',
+                'attempts as finished_attempts_count' => fn ($q) => $q->where('status', '!=', 'in_progress'),
+            ]);
 
         return response()->json([
             'status' => 'success',
-            'data' => $quiz,
+            'data' => $this->formatDetail($quiz),
         ]);
     }
 
     /**
-     * Buat Ujian / Kuis Baru beserta butir soal dan kunci jawabannya
+     * Buat ujian baru beserta butir soal & kunci jawaban.
      */
-    public function store(Request $request)
+    public function store(SaveQuizRequest $request)
     {
-        $teacher = $this->resolveTeacher($request);
-        if (!$teacher) {
-            return response()->json(['status' => 'error', 'message' => 'Guru tidak terverifikasi.'], 403);
-        }
+        $teacher = $request->user();
 
-        $validated = $request->validate([
-            'classroom_id' => 'required|exists:classrooms,id',
-            'course_id' => 'required|exists:courses,id',
-            'title' => 'required|string|max:255',
-            'instructions' => 'nullable|string',
-            'duration_minutes' => 'required|integer|min:1',
-            'passing_score' => 'required|integer|min:0|max:100',
-            'starts_at' => 'nullable|date',
-            'ends_at' => 'nullable|date',
-            'is_active' => 'nullable',
-            'questions' => 'nullable|array',
-        ]);
-
-        $isActive = filter_var($request->input('is_active', true), FILTER_VALIDATE_BOOLEAN);
-        $startsAt = !empty($request->input('starts_at')) ? Carbon::parse($request->input('starts_at')) : null;
-        $endsAt = !empty($request->input('ends_at')) ? Carbon::parse($request->input('ends_at')) : null;
-
-        DB::beginTransaction();
-        try {
-            $quiz = Quiz::create([
-                'school_id' => $teacher->school_id ?? 1,
+        $quiz = DB::transaction(function () use ($request, $teacher) {
+            $quiz = Quiz::create($this->quizAttributes($request) + [
+                'school_id' => $teacher->school_id,
                 'teacher_id' => $teacher->id,
-                'classroom_id' => $validated['classroom_id'],
-                'course_id' => $validated['course_id'],
-                'title' => $validated['title'],
-                'instructions' => $validated['instructions'] ?? null,
-                'duration_minutes' => $validated['duration_minutes'],
-                'passing_score' => $validated['passing_score'],
-                'starts_at' => $startsAt,
-                'ends_at' => $endsAt,
-                'is_active' => $isActive,
-                'is_published' => $isActive,
-                'show_result_immediately' => true,
             ]);
+            $this->questionSync->sync($quiz, $request->input('questions', []));
+            return $quiz;
+        });
 
-            // Simpan Butir Soal & Opsi Jawaban jika ada
-            if ($request->has('questions') && is_array($request->input('questions'))) {
-                foreach ($request->input('questions') as $index => $qData) {
-                    if (empty($qData['question_text'])) continue;
+        $quiz->load(['classroom:id,name,code', 'course:id,title', 'questions.options'])
+            ->loadCount(['attempts', 'attempts as finished_attempts_count' => fn ($q) => $q->where('status', '!=', 'in_progress')]);
 
-                    $question = QuizQuestion::create([
-                        'quiz_id' => $quiz->id,
-                        'question_text' => $qData['question_text'],
-                        'image_url' => $qData['image_url'] ?? null,
-                        'points' => $qData['points'] ?? 10,
-                        'explanation' => $qData['explanation'] ?? null,
-                        'order_index' => $index + 1,
-                    ]);
-
-                    if (!empty($qData['options']) && is_array($qData['options'])) {
-                        foreach ($qData['options'] as $opt) {
-                            QuizOption::create([
-                                'question_id' => $question->id,
-                                'option_label' => $opt['option_label'] ?? 'A',
-                                'option_text' => $opt['option_text'] ?? '',
-                                'image_url' => $opt['image_url'] ?? null,
-                                'is_correct' => filter_var($opt['is_correct'] ?? false, FILTER_VALIDATE_BOOLEAN),
-                            ]);
-                        }
-                    }
-                }
-            }
-
-            DB::commit();
-
-            $quiz->load(['classroom:id,name,code', 'course:id,title', 'questions.options']);
-
-            return response()->json([
-                'status' => 'success',
-                'message' => "Ujian \"{$quiz->title}\" berhasil dibuat dan dijadwalkan.",
-                'data' => $quiz,
-            ], 201);
-        } catch (\Throwable $e) {
-            DB::rollBack();
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Gagal menyimpan ujian: ' . $e->getMessage(),
-            ], 500);
-        }
+        return response()->json([
+            'status' => 'success',
+            'message' => "Ujian \"{$quiz->title}\" berhasil dibuat.",
+            'data' => $this->formatDetail($quiz),
+        ], 201);
     }
 
     /**
-     * Perbarui Ujian beserta butir soal & kunci jawaban
+     * Perbarui ujian. Soal disinkronkan berdasarkan ID sehingga jawaban siswa tidak hilang.
      */
-    public function update(Request $request, $id)
+    public function update(SaveQuizRequest $request, $id)
     {
-        $teacher = $this->resolveTeacher($request);
-        $quiz = Quiz::findOrFail($id);
+        $quiz = $this->ownQuiz($request, $id);
 
-        $validated = $request->validate([
-            'classroom_id' => 'required|exists:classrooms,id',
-            'course_id' => 'required|exists:courses,id',
-            'title' => 'required|string|max:255',
-            'instructions' => 'nullable|string',
-            'duration_minutes' => 'required|integer|min:1',
-            'passing_score' => 'required|integer|min:0|max:100',
-            'starts_at' => 'nullable|date',
-            'ends_at' => 'nullable|date',
-            'is_active' => 'nullable',
-            'questions' => 'nullable|array',
+        DB::transaction(function () use ($request, $quiz) {
+            $quiz->update($this->quizAttributes($request));
+            $this->questionSync->sync($quiz, $request->input('questions', []));
+        });
+
+        $quiz->refresh()
+            ->load(['classroom:id,name,code', 'course:id,title', 'questions.options'])
+            ->loadCount(['attempts', 'attempts as finished_attempts_count' => fn ($q) => $q->where('status', '!=', 'in_progress')]);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => "Ujian \"{$quiz->title}\" berhasil diperbarui.",
+            'data' => $this->formatDetail($quiz),
         ]);
-
-        $isActive = filter_var($request->input('is_active', $quiz->is_active), FILTER_VALIDATE_BOOLEAN);
-        $startsAt = !empty($request->input('starts_at')) ? Carbon::parse($request->input('starts_at')) : null;
-        $endsAt = !empty($request->input('ends_at')) ? Carbon::parse($request->input('ends_at')) : null;
-
-        DB::beginTransaction();
-        try {
-            $quiz->update([
-                'classroom_id' => $validated['classroom_id'],
-                'course_id' => $validated['course_id'],
-                'title' => $validated['title'],
-                'instructions' => $validated['instructions'] ?? null,
-                'duration_minutes' => $validated['duration_minutes'],
-                'passing_score' => $validated['passing_score'],
-                'starts_at' => $startsAt,
-                'ends_at' => $endsAt,
-                'is_active' => $isActive,
-                'is_published' => $isActive,
-            ]);
-
-            // Jika ada pembaharuan butir soal
-            if ($request->has('questions') && is_array($request->input('questions'))) {
-                // Hapus soal lama dan gantikan dengan yang baru
-                $quiz->questions()->delete();
-
-                foreach ($request->input('questions') as $index => $qData) {
-                    if (empty($qData['question_text'])) continue;
-
-                    $question = QuizQuestion::create([
-                        'quiz_id' => $quiz->id,
-                        'question_text' => $qData['question_text'],
-                        'image_url' => $qData['image_url'] ?? null,
-                        'points' => $qData['points'] ?? 10,
-                        'explanation' => $qData['explanation'] ?? null,
-                        'order_index' => $index + 1,
-                    ]);
-
-                    if (!empty($qData['options']) && is_array($qData['options'])) {
-                        foreach ($qData['options'] as $opt) {
-                            QuizOption::create([
-                                'question_id' => $question->id,
-                                'option_label' => $opt['option_label'] ?? 'A',
-                                'option_text' => $opt['option_text'] ?? '',
-                                'image_url' => $opt['image_url'] ?? null,
-                                'is_correct' => filter_var($opt['is_correct'] ?? false, FILTER_VALIDATE_BOOLEAN),
-                            ]);
-                        }
-                    }
-                }
-            }
-
-            DB::commit();
-
-            $quiz->load(['classroom:id,name,code', 'course:id,title', 'questions.options']);
-
-            return response()->json([
-                'status' => 'success',
-                'message' => "Ujian \"{$quiz->title}\" berhasil diperbarui.",
-                'data' => $quiz,
-            ]);
-        } catch (\Throwable $e) {
-            DB::rollBack();
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Gagal memperbarui ujian: ' . $e->getMessage(),
-            ], 500);
-        }
     }
 
     /**
-     * Toggle status aktif / nonaktif ujian
+     * Toggle status aktif / nonaktif ujian.
      */
     public function toggleStatus(Request $request, $id)
     {
-        $teacher = $this->resolveTeacher($request);
-        $quiz = Quiz::findOrFail($id);
-
+        $quiz = $this->ownQuiz($request, $id);
         $quiz->is_active = !$quiz->is_active;
         $quiz->is_published = $quiz->is_active;
         $quiz->save();
-        $quiz->load(['classroom:id,name,code', 'course:id,title']);
 
         $statusText = $quiz->is_active ? 'diaktifkan' : 'dinonaktifkan';
 
         return response()->json([
             'status' => 'success',
             'message' => "Ujian \"{$quiz->title}\" berhasil {$statusText}.",
-            'data' => $quiz,
+            'data' => [
+                'id' => $quiz->id,
+                'is_active' => $quiz->is_active,
+                'status_state' => $quiz->status_state,
+            ],
         ]);
     }
 
     /**
-     * Hapus Ujian
+     * Hapus ujian beserta soal & riwayat pengerjaannya.
      */
     public function destroy(Request $request, $id)
     {
-        $teacher = $this->resolveTeacher($request);
-        $quiz = Quiz::findOrFail($id);
-
-        $quizTitle = $quiz->title;
+        $quiz = $this->ownQuiz($request, $id);
+        $title = $quiz->title;
         $quiz->delete();
 
         return response()->json([
             'status' => 'success',
-            'message' => "Ujian \"{$quizTitle}\" berhasil dihapus.",
+            'message' => "Ujian \"{$title}\" berhasil dihapus.",
         ]);
     }
 
     /**
-     * Unggah Gambar untuk Soal / Opsi Jawaban
+     * Unggah gambar untuk soal / opsi jawaban / pembahasan.
      */
     public function uploadImage(Request $request)
     {
         $request->validate([
-            'image' => 'required|image|mimes:jpeg,png,jpg,gif,webp,svg|max:5120', // Maks 5MB
+            // SVG sengaja tidak diizinkan karena dapat memuat skrip (XSS)
+            'image' => 'required|file|mimes:jpeg,jpg,png,gif,webp|mimetypes:image/jpeg,image/png,image/gif,image/webp|max:5120|dimensions:max_width=8000,max_height=8000',
+        ], [
+            'image.mimes' => 'Format gambar harus JPG, PNG, GIF, atau WEBP.',
+            'image.mimetypes' => 'Format gambar harus JPG, PNG, GIF, atau WEBP.',
+            'image.max' => 'Ukuran gambar maksimal 5 MB.',
         ]);
 
         $file = $request->file('image');
-        $path = $file->store('quiz_images', 'public');
-        $url = asset('storage/' . $path);
+        $extension = match ($file->getMimeType()) {
+            'image/png' => 'png',
+            'image/gif' => 'gif',
+            'image/webp' => 'webp',
+            default => 'jpg',
+        };
+        $path = $file->storeAs('quiz_images', Str::random(40) . '.' . $extension, 'public');
 
         return response()->json([
             'status' => 'success',
             'message' => 'Gambar berhasil diunggah.',
-            'url' => $url,
-            'file_name' => $file->getClientOriginalName(),
+            'url' => asset('storage/' . $path),
         ]);
     }
 
     /**
-     * Endpoint untuk Siswa di CBT Ujian Online
+     * Rekap nilai satu ujian + analisis butir soal (tingkat kesulitan).
      */
-    public function studentQuizzes(Request $request)
+    public function grades(Request $request, $id)
     {
-        $student = $request->user();
-        if (!$student || $student->role !== 'murid') {
-            $student = User::where('role', 'murid')->first();
-        }
+        $quiz = $this->ownQuiz($request, $id)->load(['classroom:id,name,code', 'course:id,title']);
 
-        if (!$student || !$student->classroom_id) {
-            return response()->json([
-                'status' => 'success',
-                'data' => [
-                    'classroom' => null,
-                    'quizzes' => [],
-                ],
-            ]);
-        }
+        $students = $quiz->classroom_id
+            ? User::where('role', 'murid')->where('classroom_id', $quiz->classroom_id)
+                ->orderBy('name')->get(['id', 'name', 'nomor_induk', 'nim_nip'])
+            : collect();
 
-        $classroom = Classroom::find($student->classroom_id);
+        $attempts = QuizAttempt::where('quiz_id', $quiz->id)->get()->keyBy('user_id');
 
-        $quizzes = Quiz::where('classroom_id', $student->classroom_id)
-            ->where('is_active', true)
-            ->with([
-                'course:id,title',
-                'teacher:id,name',
-                'questions:id,quiz_id,points',
-                'attempts' => fn($q) => $q->where('user_id', $student->id),
-            ])
-            ->orderBy('id', 'desc')
+        $rows = $students->map(function ($student) use ($attempts, $quiz) {
+            $attempt = $attempts->get($student->id);
+            return [
+                'student_id' => $student->id,
+                'name' => $student->name,
+                'nomor_induk' => $student->nomor_induk ?? $student->nim_nip,
+                'attempt_id' => $attempt?->id,
+                'status' => $attempt?->status ?? 'not_started',
+                'score' => $attempt && $attempt->isFinished() ? (float) $attempt->score : null,
+                'total_correct' => $attempt?->total_correct,
+                'total_questions' => $attempt?->total_questions,
+                'is_passed' => $attempt && $attempt->isFinished() ? $attempt->score >= $quiz->passing_score : null,
+                'started_at' => $attempt?->started_at?->toIso8601String(),
+                'submitted_at' => $attempt?->submitted_at?->toIso8601String(),
+            ];
+        })->values();
+
+        $finished = $rows->filter(fn ($row) => $row['score'] !== null);
+
+        $finishedAttemptIds = $attempts->filter(fn ($a) => $a->isFinished())->pluck('id');
+        $answerStats = QuizAnswer::whereIn('attempt_id', $finishedAttemptIds)
+            ->select('question_id', DB::raw('COUNT(*) as answered'), DB::raw('SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) as correct'))
+            ->groupBy('question_id')
             ->get()
-            ->map(function ($q) {
-                $myAttempt = $q->attempts->first();
+            ->keyBy('question_id');
+
+        $itemAnalysis = $quiz->questions()->get(['id', 'question_text', 'order_index', 'points'])
+            ->map(function ($question) use ($answerStats, $finishedAttemptIds) {
+                $stat = $answerStats->get($question->id);
+                $correct = (int) ($stat->correct ?? 0);
+                $total = $finishedAttemptIds->count();
+                $rate = $total > 0 ? round(($correct / $total) * 100, 1) : null;
+
                 return [
-                    'id' => $q->id,
-                    'title' => $q->title,
-                    'instructions' => $q->instructions,
-                    'course' => $q->course,
-                    'teacher' => $q->teacher,
-                    'duration_minutes' => $q->duration_minutes,
-                    'passing_score' => $q->passing_score,
-                    'starts_at' => $q->starts_at ? $q->starts_at->toISOString() : null,
-                    'ends_at' => $q->ends_at ? $q->ends_at->toISOString() : null,
-                    'status_state' => $q->status_state,
-                    'total_questions' => $q->questions->count(),
-                    'has_attempted' => !is_null($myAttempt),
-                    'attempt_score' => $myAttempt?->score,
-                    'is_passed' => $myAttempt?->is_passed,
+                    'question_id' => $question->id,
+                    'number' => $question->order_index,
+                    'excerpt' => Str::limit(trim(html_entity_decode(strip_tags($question->question_text))), 120),
+                    'points' => $question->points,
+                    'answered' => (int) ($stat->answered ?? 0),
+                    'correct' => $correct,
+                    'correct_rate' => $rate,
+                    'difficulty' => $rate === null ? null : ($rate >= 70 ? 'mudah' : ($rate >= 40 ? 'sedang' : 'sulit')),
                 ];
-            });
+            })->values();
 
         return response()->json([
             'status' => 'success',
             'data' => [
-                'classroom' => [
-                    'id' => $classroom?->id,
-                    'name' => $classroom?->name,
-                    'code' => $classroom?->code,
+                'quiz' => [
+                    'id' => $quiz->id,
+                    'title' => $quiz->title,
+                    'passing_score' => $quiz->passing_score,
+                    'classroom' => $quiz->classroom,
+                    'course' => $quiz->course,
+                    'status_state' => $quiz->status_state,
                 ],
-                'quizzes' => $quizzes,
+                'summary' => [
+                    'total_students' => $rows->count(),
+                    'finished' => $finished->count(),
+                    'in_progress' => $rows->where('status', 'in_progress')->count(),
+                    'not_started' => $rows->where('status', 'not_started')->count(),
+                    'average_score' => $finished->count() > 0 ? round($finished->avg('score'), 2) : null,
+                    'highest_score' => $finished->max('score'),
+                    'lowest_score' => $finished->min('score'),
+                    'passed' => $finished->where('is_passed', true)->count(),
+                    'failed' => $finished->where('is_passed', false)->count(),
+                ],
+                'students' => $rows,
+                'item_analysis' => $itemAnalysis,
             ],
         ]);
+    }
+
+    /**
+     * Ekspor rekap nilai satu ujian ke CSV (dapat dibuka di Excel).
+     */
+    public function exportGrades(Request $request, $id)
+    {
+        $payload = $this->grades($request, $id)->getData(true)['data'];
+        $quiz = $payload['quiz'];
+        $fileName = 'rekap-nilai-' . Str::slug($quiz['title']) . '-' . now()->format('Ymd-His') . '.csv';
+
+        return response()->streamDownload(function () use ($payload) {
+            $handle = fopen('php://output', 'w');
+            // BOM agar Excel membaca UTF-8 dengan benar
+            fwrite($handle, "\xEF\xBB\xBF");
+
+            fputcsv($handle, ['NO', 'NIS', 'NAMA SISWA', 'STATUS', 'BENAR', 'TOTAL SOAL', 'NILAI', 'KETERANGAN', 'WAKTU SELESAI']);
+
+            $statusLabels = [
+                'submitted' => 'Selesai',
+                'timed_out' => 'Waktu Habis',
+                'in_progress' => 'Sedang Mengerjakan',
+                'not_started' => 'Belum Mengerjakan',
+            ];
+
+            foreach ($payload['students'] as $index => $row) {
+                fputcsv($handle, array_map(fn ($value) => $this->csvSafe($value), [
+                    $index + 1,
+                    $row['nomor_induk'] ?? '-',
+                    $row['name'],
+                    $statusLabels[$row['status']] ?? $row['status'],
+                    $row['total_correct'] ?? '-',
+                    $row['total_questions'] ?? '-',
+                    $row['score'] ?? '-',
+                    $row['is_passed'] === null ? '-' : ($row['is_passed'] ? 'LULUS' : 'REMEDIAL'),
+                    $row['submitted_at'] ? Carbon::parse($row['submitted_at'])->format('d/m/Y H:i') : '-',
+                ]));
+            }
+
+            fclose($handle);
+        }, $fileName, ['Content-Type' => 'text/csv; charset=UTF-8']);
+    }
+
+    // ---------------------------------------------------------------------
+    // Helpers
+    // ---------------------------------------------------------------------
+
+    private function ownQuiz(Request $request, $id): Quiz
+    {
+        return Quiz::where('teacher_id', $request->user()->id)->findOrFail($id);
+    }
+
+    private function quizAttributes(SaveQuizRequest $request): array
+    {
+        $isActive = $request->boolean('is_active');
+
+        return [
+            'classroom_id' => (int) $request->input('classroom_id'),
+            'course_id' => (int) $request->input('course_id'),
+            'title' => trim($request->input('title')),
+            'instructions' => $request->filled('instructions') ? trim($request->input('instructions')) : null,
+            'duration_minutes' => (int) $request->input('duration_minutes'),
+            'passing_score' => (int) $request->input('passing_score'),
+            'starts_at' => $request->scheduleValue('starts_at'),
+            'ends_at' => $request->scheduleValue('ends_at'),
+            'is_active' => $isActive,
+            'is_published' => $isActive,
+            'show_result_immediately' => $request->boolean('show_result_immediately'),
+        ];
+    }
+
+    private function assignedOptions(int $teacherId)
+    {
+        return ClassSubjectAssignment::where('teacher_id', $teacherId)
+            ->with(['classroom:id,name,code', 'course:id,title'])
+            ->get()
+            ->filter(fn ($a) => $a->classroom && $a->course)
+            ->map(fn ($a) => [
+                'assignment_id' => $a->id,
+                'classroom_id' => $a->classroom_id,
+                'classroom_name' => $a->classroom->name,
+                'classroom_code' => $a->classroom->code,
+                'course_id' => $a->course_id,
+                'course_title' => $a->course->title,
+                'label' => "{$a->classroom->name} ({$a->classroom->code}) — {$a->course->title}",
+            ])
+            ->values();
+    }
+
+    private function formatListItem(Quiz $quiz): array
+    {
+        $finished = (int) $quiz->finished_attempts_count;
+
+        return [
+            'id' => $quiz->id,
+            'title' => $quiz->title,
+            'instructions' => $quiz->instructions,
+            'classroom_id' => $quiz->classroom_id,
+            'classroom' => $quiz->classroom,
+            'course_id' => $quiz->course_id,
+            'course' => $quiz->course,
+            'duration_minutes' => $quiz->duration_minutes,
+            'passing_score' => $quiz->passing_score,
+            'starts_at' => $quiz->starts_at?->toIso8601String(),
+            'ends_at' => $quiz->ends_at?->toIso8601String(),
+            'is_active' => (bool) $quiz->is_active,
+            'show_result_immediately' => (bool) $quiz->show_result_immediately,
+            'status_state' => $quiz->status_state,
+            'total_questions' => (int) $quiz->questions_count,
+            'total_points' => (int) $quiz->total_points,
+            'total_attempts' => $finished,
+            'average_score' => $finished > 0 ? round((float) $quiz->average_score, 1) : null,
+            'pass_rate_percentage' => $finished > 0 ? (int) round(($quiz->passed_attempts_count / $finished) * 100) : null,
+            'created_at' => $quiz->created_at?->toIso8601String(),
+            'updated_at' => $quiz->updated_at?->toIso8601String(),
+        ];
+    }
+
+    private function formatDetail(Quiz $quiz): array
+    {
+        return [
+            'id' => $quiz->id,
+            'title' => $quiz->title,
+            'instructions' => $quiz->instructions,
+            'classroom_id' => $quiz->classroom_id,
+            'classroom' => $quiz->classroom,
+            'course_id' => $quiz->course_id,
+            'course' => $quiz->course,
+            'duration_minutes' => $quiz->duration_minutes,
+            'passing_score' => $quiz->passing_score,
+            'starts_at' => $quiz->starts_at?->toIso8601String(),
+            'ends_at' => $quiz->ends_at?->toIso8601String(),
+            'is_active' => (bool) $quiz->is_active,
+            'show_result_immediately' => (bool) $quiz->show_result_immediately,
+            'status_state' => $quiz->status_state,
+            'attempts_count' => (int) ($quiz->attempts_count ?? 0),
+            'finished_attempts_count' => (int) ($quiz->finished_attempts_count ?? 0),
+            'total_points' => (int) $quiz->questions->sum('points'),
+            'questions' => $quiz->questions->map(fn ($question) => [
+                'id' => $question->id,
+                'question_text' => $question->question_text,
+                'image_url' => $question->image_url,
+                'points' => $question->points,
+                'explanation' => $question->explanation,
+                'order_index' => $question->order_index,
+                'options' => $question->options->map(fn ($option) => [
+                    'id' => $option->id,
+                    'option_label' => $option->option_label,
+                    'option_text' => $option->option_text,
+                    'image_url' => $option->image_url,
+                    'is_correct' => (bool) $option->is_correct,
+                ])->values(),
+            ])->values(),
+            'updated_at' => $quiz->updated_at?->toIso8601String(),
+        ];
+    }
+
+    /** Mencegah formula injection saat CSV dibuka di Excel. */
+    private function csvSafe($value)
+    {
+        if (is_string($value) && $value !== '' && in_array($value[0], ['=', '+', '-', '@', "\t", "\r"], true)) {
+            return "'" . $value;
+        }
+        return $value;
     }
 }

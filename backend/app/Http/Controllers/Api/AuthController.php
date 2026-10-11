@@ -4,17 +4,20 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Support\UserPayload;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
+use Laravel\Sanctum\PersonalAccessToken;
 
 class AuthController extends Controller
 {
     public function login(Request $request)
     {
-        // Login menggunakan Nomor Induk (NIP untuk Guru, NIS untuk Siswa)
+        // Login menggunakan Nomor Induk (NIP untuk Guru, NIS untuk Siswa) atau email
         $request->validate([
-            'nomor_induk' => 'required|string',
+            'nomor_induk' => 'required|string|max:255',
             'password' => 'required|string',
         ], [
             'nomor_induk.required' => 'Nomor Induk (NIP / NIS) wajib diisi.',
@@ -23,43 +26,33 @@ class AuthController extends Controller
 
         $identifier = trim($request->input('nomor_induk'));
 
-        // Mencari pengguna berdasarkan nomor_induk (NIP/NIS), nim_nip, atau email
+        // nim_nip hanya dipakai sebagai cadangan untuk akun lama yang belum memiliki nomor_induk
         $user = User::where('nomor_induk', $identifier)
-            ->orWhere('nim_nip', $identifier)
             ->orWhere('email', $identifier)
+            ->orWhere(fn ($q) => $q->whereNull('nomor_induk')->where('nim_nip', $identifier))
             ->first();
 
-        if (!$user) {
-            throw ValidationException::withMessages([
-                'nomor_induk' => ['Nomor Induk (NIP / NIS / ID Admin) tidak terdaftar dalam sistem Cendekia.'],
-            ]);
-        }
+        // Selalu jalankan pengecekan hash agar waktu respons tidak membocorkan keberadaan akun
+        $passwordValid = Hash::check(
+            $request->input('password'),
+            $user?->password ?? '$2y$10$usesomesillystringfore7hnbRJHxXVLeakoG8K30oukPsA.ztMG'
+        );
 
-        if (!Hash::check($request->password, $user->password)) {
+        if (!$user || !$passwordValid) {
             throw ValidationException::withMessages([
-                'password' => ['Kata sandi yang Anda masukkan salah. Mohon periksa kembali.'],
+                'nomor_induk' => ['Nomor induk atau kata sandi salah.'],
             ]);
         }
 
         $token = $user->createToken('auth_token')->plainTextToken;
-        $user->load('school');
 
         return response()->json([
             'status' => 'success',
             'message' => 'Login berhasil.',
             'data' => [
-                'user' => [
-                    'id' => $user->id,
-                    'name' => $user->name,
-                    'email' => $user->email,
-                    'role' => $user->role,
-                    'school_id' => $user->school_id,
-                    'school' => $user->school,
-                    'nomor_induk' => $user->nomor_induk ?? $user->nim_nip,
-                    'nim_nip' => $user->nim_nip,
-                ],
+                'user' => UserPayload::make($user),
                 'token' => $token,
-            ]
+            ],
         ]);
     }
 
@@ -67,13 +60,77 @@ class AuthController extends Controller
     {
         return response()->json([
             'status' => 'success',
-            'data' => $request->user()->load(['school', 'classroom']),
+            'data' => UserPayload::make($request->user()),
+        ]);
+    }
+
+    public function updateProfile(Request $request)
+    {
+        $user = $request->user();
+
+        $validated = $request->validate([
+            'name' => 'required|string|max:255',
+            'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user->id)],
+        ], [
+            'name.required' => 'Nama wajib diisi.',
+            'email.required' => 'Email wajib diisi.',
+            'email.email' => 'Format email tidak valid.',
+            'email.unique' => 'Email sudah digunakan oleh akun lain.',
+        ]);
+
+        $user->update($validated);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Profil berhasil diperbarui.',
+            'data' => UserPayload::make($user->fresh()),
+        ]);
+    }
+
+    public function updatePassword(Request $request)
+    {
+        $user = $request->user();
+
+        $request->validate([
+            'current_password' => 'required|string',
+            'password' => 'required|string|min:8|confirmed',
+        ], [
+            'current_password.required' => 'Kata sandi saat ini wajib diisi.',
+            'password.required' => 'Kata sandi baru wajib diisi.',
+            'password.min' => 'Kata sandi baru minimal 8 karakter.',
+            'password.confirmed' => 'Konfirmasi kata sandi baru tidak cocok.',
+        ]);
+
+        if (!Hash::check($request->input('current_password'), $user->password)) {
+            throw ValidationException::withMessages([
+                'current_password' => ['Kata sandi saat ini salah.'],
+            ]);
+        }
+
+        $user->password = Hash::make($request->input('password'));
+        $user->save();
+
+        // Cabut seluruh sesi lain, pertahankan token yang sedang dipakai
+        $tokens = $user->tokens();
+        $current = $user->currentAccessToken();
+        if ($current instanceof PersonalAccessToken) {
+            $tokens->where('id', '!=', $current->getKey());
+        }
+        $tokens->delete();
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Kata sandi berhasil diperbarui. Sesi di perangkat lain telah dikeluarkan.',
+            'data' => UserPayload::make($user),
         ]);
     }
 
     public function logout(Request $request)
     {
-        $request->user()->currentAccessToken()->delete();
+        $token = $request->user()->currentAccessToken();
+        if ($token instanceof PersonalAccessToken) {
+            $token->delete();
+        }
 
         return response()->json([
             'status' => 'success',

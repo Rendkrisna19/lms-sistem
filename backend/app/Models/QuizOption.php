@@ -23,6 +23,6 @@ class QuizOption extends Model
 
     public function question()
     {
-        return $this->belongsTo(QuizQuestion::class);
+        return $this->belongsTo(QuizQuestion::class, 'question_id');
     }
 }
