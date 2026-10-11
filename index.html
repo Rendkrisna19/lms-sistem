@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Carousel Testimoni Bertingkat</title>
+  
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.css" />
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 0;
+      background: transparent;
+      overflow: hidden;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+    }
+
+    .carousel-container {
+      position: relative;
+      width: 100%;
+      max-width: 820px; /* Kontainer dipersempit agar layout lebih terkonsentrasi */
+      margin: 0 auto;
+      padding: 40px 20px;
+    }
+
+    .swiper {
+      width: 100%;
+      padding-top: 35px;
+      padding-bottom: 35px;
+      overflow: visible !important;
+    }
+
+    /* Ukuran kartu */
+    .swiper-slide {
+      width: 290px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      transition: transform 0.4s ease;
+      
+      /* Level KIRI & KANAN: Turun ke bawah */
+      transform: translateY(32px);
+      filter: none !important;
+      opacity: 1 !important;
+      z-index: 1;
+    }
+
+    /* Level TENGAH: Naik ke atas */
+    .swiper-slide-active {
+      transform: translateY(-24px) !important;
+      filter: none !important;
+      opacity: 1 !important;
+      z-index: 10 !important;
+    }
+
+    /* Optimasi gambar tetap jernih */
+    .card-media {
+      width: 100%;
+      height: auto;
+      display: block;
+      object-fit: contain;
+      user-select: none;
+      pointer-events: none;
+      image-rendering: -webkit-optimize-contrast;
+      image-rendering: crisp-edges;
+      backface-visibility: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Tombol Navigasi Panah */
+    .swiper-button-prev,
+    .swiper-button-next {
+      color: #111;
+      background: #ffffff;
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      transition: transform 0.2s ease, background 0.2s ease;
+      z-index: 25;
+      top: 50%;
+      transform: translateY(-50%);
+    }
+
+    .swiper-button-prev::after,
+    .swiper-button-next::after {
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .swiper-button-prev:hover,
+    .swiper-button-next:hover {
+      background: #f7f7f7;
+      transform: translateY(-50%) scale(1.08);
+    }
+
+    .swiper-button-prev {
+      left: -5px;
+    }
+
+    .swiper-button-next {
+      right: -5px;
+    }
+
+    @media (max-width: 768px) {
+      .carousel-container {
+        padding: 20px 5px;
+      }
+      .swiper-slide {
+        width: 230px;
+        transform: translateY(18px);
+      }
+      .swiper-slide-active {
+        transform: translateY(-14px) !important;
+      }
+      .swiper-button-prev,
+      .swiper-button-next {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="carousel-container">
+    <div class="swiper mySwiper">
+      <div class="swiper-wrapper">
+        <div class="swiper-slide">
+          <img src="https://static.wixstatic.com/media/95f951_bd4ca29f60304372a366dc240b5a4fea~mv2.png" alt="Testimoni 1" class="card-media">
+        </div>
+        <div class="swiper-slide">
+          <img src="https://static.wixstatic.com/media/95f951_b626eaa489fc4ae9928f08ee9953e6d3~mv2.png" alt="Testimoni 2" class="card-media">
+        </div>
+        <div class="swiper-slide">
+          <img src="https://static.wixstatic.com/media/95f951_e87a166a3be14b628712bc3b9f5a8359~mv2.png" alt="Testimoni 3" class="card-media">
+        </div>
+        <div class="swiper-slide">
+          <img src="https://static.wixstatic.com/media/95f951_980f2dd74c8a4552b52e6b02598fe168~mv2.png" alt="Testimoni 4" class="card-media">
+        </div>
+        <div class="swiper-slide">
+          <img src="https://static.wixstatic.com/media/95f951_e26d5e7750b84f6a9b1e87b80c518a03~mv2.png" alt="Testimoni 5" class="card-media">
+        </div>
+        <div class="swiper-slide">
+          <img src="https://static.wixstatic.com/media/95f951_9861aeecaf49454c909b90782c995d61~mv2.png" alt="Testimoni 6" class="card-media">
+        </div>
+        <div class="swiper-slide">
+          <img src="https://static.wixstatic.com/media/95f951_806059be5cae40e986fd42f2949690df~mv2.png" alt="Testimoni 7" class="card-media">
+        </div>
+        <div class="swiper-slide">
+          <img src="https://static.wixstatic.com/media/95f951_982a6690b76f4911a2ff41aa68ef6eb9~mv2.png" alt="Testimoni 8" class="card-media">
+        </div>
+        <div class="swiper-slide">
+          <img src="https://static.wixstatic.com/media/95f951_9f022da29d4c46eba7c8a0d2643d5f39~mv2.png" alt="Testimoni 9" class="card-media">
+        </div>
+      </div>
+
+      <div class="swiper-button-prev"></div>
+      <div class="swiper-button-next"></div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.js"></script>
+  
+  <script>
+    const swiper = new Swiper(".mySwiper", {
+      grabCursor: true,
+      centeredSlides: true,
+      slidesPerView: "auto",
+      spaceBetween: -60, /* Mengompensasi padding transparan gambar bawaan agar pas merapat */
+      loop: true,
+      slideToClickedSlide: true,
+      
+      navigation: {
+        nextEl: ".swiper-button-next",
+        prevEl: ".swiper-button-prev",
+      },
+    });
+  </script>
+
+</body>
+</html>

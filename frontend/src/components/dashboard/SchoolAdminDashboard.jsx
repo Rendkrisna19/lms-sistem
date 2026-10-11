@@ -1,0 +1,189 @@
+import React, { useState, useEffect } from "react";
+import {
+  Users,
+  GraduationCap,
+  School,
+  BookMarked,
+  Activity,
+  Plus,
+  RefreshCw,
+  Building2,
+  CheckCircle2
+} from "lucide-react";
+import { Card } from "../ui/card";
+import { Button } from "../ui/button";
+import { Badge } from "../ui/badge";
+import { AdminMasterDataSection } from "./AdminMasterDataSection";
+import { BarChartCard } from "./BarChartCard";
+import { WaveChartCard } from "./WaveChartCard";
+import { api } from "../../lib/api";
+import { toast } from "sonner";
+
+export function SchoolAdminDashboard({ currentUser, onNavigateTab }) {
+  const [data, setData] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const fetchSchoolOverview = async () => {
+    try {
+      setIsLoading(true);
+      const res = await api.get("/school-admin/overview");
+      if (res.data?.status === "success") {
+        setData(res.data.data);
+      }
+    } catch (err) {
+      toast.error("Gagal memuat ringkasan sekolah.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchSchoolOverview();
+  }, []);
+
+  const schoolName = currentUser?.school?.name || data?.school?.name || "SMA Mitra Inalum";
+
+  return (
+    <div className="space-y-6 w-full">
+      {/* School Header Banner */}
+      <div className="bg-gradient-to-r from-blue-700 to-blue-600 rounded-3xl p-6 sm:p-8 text-white shadow-xl shadow-blue-500/10 flex flex-col md:flex-row md:items-center justify-between gap-6 relative overflow-hidden">
+        <div className="relative z-10 max-w-xl">
+          <Badge className="bg-white/20 text-white hover:bg-white/30 backdrop-blur-xs border-white/20 mb-3 text-xs font-semibold px-3 py-1">
+            Admin Sekolah Portal • {schoolName}
+          </Badge>
+          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white leading-tight">
+            Dashboard Akademik {schoolName}
+          </h1>
+          <p className="text-xs sm:text-sm text-blue-100 mt-2 leading-relaxed">
+            Manajemen operasional kurikulum, plotting rombel kelas, data pendidik, dan pemantauan peserta didik sekolah.
+          </p>
+        </div>
+
+        <div className="relative z-10 flex flex-wrap items-center gap-3">
+          <Button
+            onClick={() => onNavigateTab("kelas")}
+            className="rounded-xl bg-white text-blue-600 hover:bg-blue-50 font-bold text-xs h-10 px-4 shadow-md cursor-pointer"
+          >
+            <School className="h-4 w-4 mr-2" />
+            Plotting Rombel Kelas
+          </Button>
+          <Button
+            onClick={fetchSchoolOverview}
+            variant="outline"
+            className="rounded-xl bg-white/10 hover:bg-white/20 text-white border-white/20 text-xs h-10 px-3 cursor-pointer"
+            title="Muat Ulang Data"
+          >
+            <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
+          </Button>
+        </div>
+      </div>
+
+      {/* Row 1: KPI Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card
+          onClick={() => onNavigateTab("guru")}
+          className="bg-blue-600 text-white rounded-3xl p-5 shadow-lg shadow-blue-600/15 border-none flex flex-col justify-between cursor-pointer hover:shadow-xl hover:scale-[1.01] transition-all group"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-blue-100 uppercase tracking-wider">
+              Guru Pengampu
+            </span>
+            <div className="h-8 w-8 rounded-xl bg-white/20 flex items-center justify-center text-white group-hover:bg-white group-hover:text-blue-600 transition-colors">
+              <Users className="h-4 w-4" />
+            </div>
+          </div>
+          <div className="mt-4">
+            <h3 className="text-3xl font-extrabold text-white tracking-tight">
+              {isLoading ? "..." : `${data?.total_teachers || 0} Guru`}
+            </h3>
+            <p className="text-xs text-blue-100 mt-1 font-medium">
+              Terdaftar di {schoolName} →
+            </p>
+          </div>
+        </Card>
+
+        <Card
+          onClick={() => onNavigateTab("siswa")}
+          className="bg-white border-slate-200/80 rounded-3xl p-5 shadow-xs flex flex-col justify-between hover:shadow-md hover:border-blue-300 transition-all cursor-pointer group"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">
+              Siswa Terdaftar
+            </span>
+            <div className="h-8 w-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-colors">
+              <GraduationCap className="h-4 w-4" />
+            </div>
+          </div>
+          <div className="mt-4">
+            <h3 className="text-3xl font-extrabold text-slate-900 tracking-tight">
+              {isLoading ? "..." : `${data?.total_students || 0} Siswa`}
+            </h3>
+            <p className="text-xs text-blue-600 mt-1 font-medium">
+              Peserta Didik Aktif →
+            </p>
+          </div>
+        </Card>
+
+        <Card
+          onClick={() => onNavigateTab("kelas")}
+          className="bg-white border-slate-200/80 rounded-3xl p-5 shadow-xs flex flex-col justify-between hover:shadow-md hover:border-blue-300 transition-all cursor-pointer group"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">
+              Rombel Kelas
+            </span>
+            <div className="h-8 w-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-colors">
+              <School className="h-4 w-4" />
+            </div>
+          </div>
+          <div className="mt-4">
+            <h3 className="text-3xl font-extrabold text-slate-900 tracking-tight">
+              {isLoading ? "..." : `${data?.total_classrooms || 0} Rombel`}
+            </h3>
+            <p className="text-xs text-blue-600 mt-1 font-medium">
+              Kelola Kelas & Plotting →
+            </p>
+          </div>
+        </Card>
+
+        <Card
+          onClick={() => onNavigateTab("mapel")}
+          className="bg-white border-slate-200/80 rounded-3xl p-5 shadow-xs flex flex-col justify-between hover:shadow-md hover:border-blue-300 transition-all cursor-pointer group"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">
+              Mata Pelajaran
+            </span>
+            <div className="h-8 w-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-colors">
+              <BookMarked className="h-4 w-4" />
+            </div>
+          </div>
+          <div className="mt-4">
+            <h3 className="text-3xl font-extrabold text-slate-900 tracking-tight">
+              {isLoading ? "..." : `${data?.total_courses || 0} Mapel`}
+            </h3>
+            <p className="text-xs text-blue-600 mt-1 font-medium">
+              Kurikulum Berjalan →
+            </p>
+          </div>
+        </Card>
+      </div>
+
+      {/* Row 2: Charts */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 w-full">
+        <div className="lg:col-span-7">
+          <BarChartCard role="admin" />
+        </div>
+        <div className="lg:col-span-5">
+          <WaveChartCard role="admin" />
+        </div>
+      </div>
+
+      {/* Row 3: Admin Master Data Management (Guru & Siswa) */}
+      <AdminMasterDataSection
+        onDataUpdated={fetchSchoolOverview}
+        onNavigateTab={onNavigateTab}
+      />
+    </div>
+  );
+}
