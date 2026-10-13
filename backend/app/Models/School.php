@@ -13,6 +13,7 @@ class School extends Model
         'name',
         'npsn',
         'jenjang',
+        'accreditation',
         'address',
         'phone',
         'email',

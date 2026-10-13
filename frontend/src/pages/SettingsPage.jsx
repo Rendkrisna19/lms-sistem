@@ -19,6 +19,9 @@ import { Input } from "../components/ui/input";
 import { Badge } from "../components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
 import { toast } from "sonner";
+import { api, getErrorMessage, getValidationErrors } from "../lib/api";
+import { SchoolProfileForm } from "../components/school/SchoolProfileForm";
+import { SchoolAdminsCard } from "../components/school/SchoolAdminsCard";
 
 // Curated avatar presets for quick 1-click selection
 const AVATAR_PRESETS = [
@@ -103,7 +106,7 @@ export function SettingsPage({ currentUser, onUpdateCurrentUser }) {
   };
 
   // Save profile name & email
-  const handleSaveProfile = (e) => {
+  const handleSaveProfile = async (e) => {
     e.preventDefault();
     if (!name.trim()) {
       toast.error("Nama lengkap tidak boleh kosong.");
@@ -118,11 +121,17 @@ export function SettingsPage({ currentUser, onUpdateCurrentUser }) {
         avatar: avatar,
       });
     }
-    toast.success("Informasi akun berhasil disimpan!");
+    try {
+      const res = await api.put("/me/profile", { name: name.trim(), email: email.trim() });
+      onUpdateCurrentUser?.({ ...currentUser, name: res.data.data.name ?? name.trim(), email: res.data.data.email ?? email.trim() });
+      toast.success("Informasi akun berhasil disimpan!");
+    } catch (err) {
+      toast.error(getErrorMessage(err, "Informasi akun belum dapat disimpan."));
+    }
   };
 
   // Save password change
-  const handleSavePassword = (e) => {
+  const handleSavePassword = async (e) => {
     e.preventDefault();
     if (!oldPassword || !newPassword) {
       toast.error("Mohon lengkapi kata sandi lama dan kata sandi baru.");
@@ -137,10 +146,16 @@ export function SettingsPage({ currentUser, onUpdateCurrentUser }) {
       return;
     }
 
-    toast.success("Kata sandi akun Anda berhasil diperbarui!");
-    setOldPassword("");
-    setNewPassword("");
-    setConfirmPassword("");
+    try {
+      await api.put("/me/password", { current_password: oldPassword, password: newPassword, password_confirmation: confirmPassword });
+      toast.success("Kata sandi akun Anda berhasil diperbarui!");
+      setOldPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+    } catch (err) {
+      const first = Object.values(getValidationErrors(err) ?? {})[0];
+      toast.error(first || getErrorMessage(err, "Kata sandi belum dapat diperbarui."));
+    }
   };
 
   const role = currentUser?.role || "murid";
@@ -156,6 +171,13 @@ export function SettingsPage({ currentUser, onUpdateCurrentUser }) {
           Perbarui foto profil, identitas pengguna, dan preferensi pembelajaran akun Anda
         </p>
       </div>
+
+      {currentUser?.role === "admin" && (
+        <div className="space-y-6">
+          <SchoolProfileForm />
+          <SchoolAdminsCard currentUserId={currentUser?.id} />
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* LEFT COLUMN: Profile Info & Avatar Editor (8 cols) */}

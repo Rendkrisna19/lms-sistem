@@ -5,7 +5,6 @@ import { Dialog } from "../ui/dialog";
 import { Field } from "../ui/field";
 import { Input } from "../ui/input";
 import { Button } from "../ui/button";
-import { SchoolScopeNotice } from "../admin/SchoolScopeSelect";
 import { FormSection, ProfileFormFields } from "../admin/profile/ProfileFormFields";
 import { adminApi } from "../../features/admin/adminApi";
 import { PERSONAL_KEYS, TEACHER_KEYS, formToPayload, profileToForm } from "../../features/admin/profile";
@@ -94,7 +93,6 @@ function TeacherForm({ teacher, onClose, onSuccess }) {
 
   return (
     <form onSubmit={handleSubmit} noValidate className="space-y-8">
-      <SchoolScopeNotice scope={scope} />
 
       <FormSection icon={IdCard} title="Akun guru" description="Identitas dan kredensial untuk masuk ke sistem.">
         <Field label="Nama lengkap" htmlFor="teacher-name" required error={errors.name} className="sm:col-span-2">

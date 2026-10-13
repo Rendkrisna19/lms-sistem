@@ -7,7 +7,6 @@ import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Skeleton } from "../ui/skeleton";
-import { SchoolScopeNotice } from "../admin/SchoolScopeSelect";
 import { TeacherModal } from "../modals/TeacherModal";
 import { StudentModal } from "../modals/StudentModal";
 import { CourseModal } from "../modals/CourseModal";
@@ -255,7 +254,6 @@ export function AdminMasterDataSection({ onDataUpdated, onNavigateTab }) {
         </div>
       </div>
 
-      <SchoolScopeNotice scope={teachers.scope} />
 
       {/* Search Input Bar */}
       <div className="flex items-center justify-between gap-3">

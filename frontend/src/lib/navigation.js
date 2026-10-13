@@ -11,6 +11,7 @@ import {
   GraduationCap,
   LayoutDashboard,
   School,
+  UserCog,
   Users,
 } from "lucide-react";
 
@@ -37,6 +38,7 @@ export const NAV_ITEMS = {
     { path: "/guru", label: "Data Guru", icon: Users },
     { path: "/siswa", label: "Data Siswa", icon: GraduationCap },
     { path: "/mapel", label: "Mata Pelajaran", icon: BookMarked },
+    { path: "/pengguna", label: "Manajemen User", icon: UserCog },
     { path: "/statistik", label: "Statistik Sistem", icon: BarChart3 },
   ],
   admin: [
@@ -45,6 +47,7 @@ export const NAV_ITEMS = {
     { path: "/guru", label: "Data Guru", icon: Users },
     { path: "/siswa", label: "Data Siswa", icon: GraduationCap },
     { path: "/mapel", label: "Mata Pelajaran", icon: BookMarked },
+    { path: "/pengguna", label: "Manajemen User", icon: UserCog },
     { path: "/statistik", label: "Statistik Sekolah", icon: BarChart3 },
   ],
   guru: [

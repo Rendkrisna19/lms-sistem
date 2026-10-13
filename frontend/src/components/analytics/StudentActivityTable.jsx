@@ -20,7 +20,7 @@ function AccessCount({ icon: Icon, value }) {
 }
 
 /** Tabel aktivitas akses materi per siswa. Data sudah difilter oleh pemanggil. */
-export function StudentActivityTable({ students, isLoading, isFiltered }) {
+export function StudentActivityTable({ students, isLoading, isFiltered, startIndex = 1 }) {
   return (
     <div className="overflow-x-auto">
       <Table>
@@ -58,7 +58,7 @@ export function StudentActivityTable({ students, isLoading, isFiltered }) {
           ) : (
             students.map((student, index) => (
               <TableRow key={student.id}>
-                <TableCell className="text-slate-400 tabular-nums">{index + 1}</TableCell>
+                <TableCell className="text-slate-400 tabular-nums">{startIndex + index}</TableCell>
                 <TableCell>
                   <div className="font-semibold text-slate-900">{student.name}</div>
                   <div className="font-mono text-xs text-slate-500">NIS {student.nis ?? "-"}</div>

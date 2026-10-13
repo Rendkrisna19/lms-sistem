@@ -5,7 +5,6 @@ import { toast } from "sonner";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { CustomSelect } from "../ui/custom-select";
-import { SchoolScopeNotice } from "../admin/SchoolScopeSelect";
 import { adminApi } from "../../features/admin/adminApi";
 import { useAdminResource } from "../../features/admin/useAdminResource";
 import { getErrorMessage } from "../../lib/api";
@@ -89,7 +88,6 @@ function AssignmentDialog({ classroom, onClose, onSuccess }) {
 
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="mt-5 space-y-4">
-          <SchoolScopeNotice scope={scope} />
 
           <div className="relative z-30">
             <label className="text-xs font-semibold text-slate-700 block mb-1.5">Pilih Mata Pelajaran</label>

@@ -5,7 +5,6 @@ import { Card } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { Skeleton } from "../components/ui/skeleton";
 import { AdminListToolbar } from "../components/admin/AdminListToolbar";
-import { SchoolScopeNotice } from "../components/admin/SchoolScopeSelect";
 import { CourseModal } from "../components/modals/CourseModal";
 import { ConfirmDeleteModal } from "../components/modals/ConfirmDeleteModal";
 import { useAdminResource } from "../features/admin/useAdminResource";
@@ -86,7 +85,6 @@ export function CoursesPage() {
           unit="Mata Pelajaran"
           searchWidth="sm:w-64"
         />
-        <SchoolScopeNotice scope={scope} />
       </Card>
 
       {/* Courses Cards Grid */}

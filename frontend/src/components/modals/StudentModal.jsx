@@ -7,7 +7,6 @@ import { Input } from "../ui/input";
 import { CustomSelect } from "../ui/custom-select";
 import { GraduationCap } from "lucide-react";
 import { Button } from "../ui/button";
-import { SchoolScopeNotice } from "../admin/SchoolScopeSelect";
 import { FormSection, ProfileFormFields } from "../admin/profile/ProfileFormFields";
 import { adminApi } from "../../features/admin/adminApi";
 import { useAdminResource } from "../../features/admin/useAdminResource";
@@ -102,7 +101,6 @@ function StudentForm({ student, onClose, onSuccess }) {
 
   return (
     <form onSubmit={handleSubmit} noValidate className="space-y-8">
-      <SchoolScopeNotice scope={scope} />
 
       <FormSection icon={IdCard} title="Akun & kelas" description="Identitas untuk masuk dan kelas tempat siswa belajar.">
         <Field label="Nama lengkap" htmlFor="student-name" required error={errors.name} className="sm:col-span-2">

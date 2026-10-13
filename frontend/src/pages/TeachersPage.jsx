@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { Avatar, AvatarFallback } from "../components/ui/avatar";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
-import { SchoolScopeNotice, SchoolScopeSelect } from "../components/admin/SchoolScopeSelect";
+import { SchoolScopeSelect } from "../components/admin/SchoolScopeSelect";
 import { AdminDataPanel } from "../components/admin/data/AdminDataPanel";
 import { DataTable } from "../components/admin/data/DataTable";
 import { DataToolbar } from "../components/admin/data/DataToolbar";
@@ -202,12 +202,7 @@ export function TeachersPage() {
             Tambah guru
           </Button>
         ) : null}
-        notice={
-          <>
-            <SchoolScopeNotice scope={scope} />
-          </>
-        }
-        toolbar={
+                toolbar={
           <DataToolbar
             query={view.query}
             onQueryChange={view.setQuery}

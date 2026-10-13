@@ -6,7 +6,6 @@ import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
 import { NativeSelect } from "../ui/native-select";
 import { Button } from "../ui/button";
-import { SchoolScopeNotice } from "../admin/SchoolScopeSelect";
 import { adminApi } from "../../features/admin/adminApi";
 import { useAdminResource } from "../../features/admin/useAdminResource";
 import { getErrorMessage, getValidationErrors } from "../../lib/api";
@@ -76,7 +75,6 @@ function CourseForm({ course, onClose, onSuccess }) {
 
   return (
     <form onSubmit={handleSubmit} noValidate className="space-y-4">
-      <SchoolScopeNotice scope={scope} />
 
       <Field label="Nama mata pelajaran" htmlFor="course-title" required error={errors.title}>
         <Input {...controlProps("course-title", errors.title)} {...bind("title")} placeholder="Contoh: Matematika Wajib" autoComplete="off" />

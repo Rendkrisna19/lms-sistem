@@ -12,6 +12,10 @@ import { CustomSelect } from "../components/ui/custom-select";
 import { Alert } from "../components/ui/alert";
 import { AnalyticsSummary } from "../components/analytics/AnalyticsSummary";
 import { StudentActivityTable } from "../components/analytics/StudentActivityTable";
+import { Pagination } from "../components/ui/pagination";
+import { usePagedList } from "../hooks/usePagedList";
+
+const PAGE_SIZE = 10;
 
 const EMPTY_SUMMARY = { total_students_analyzed: 0, total_media_interactions: 0 };
 
@@ -42,6 +46,7 @@ export function StatsPage({ currentUser }) {
   const students = useMemo(() => analytics.data?.students ?? [], [analytics.data]);
   const summary = analytics.data?.summary ?? EMPTY_SUMMARY;
   const filtered = useMemo(() => filterStudents(students, { search, media: mediaFilter }), [students, search, mediaFilter]);
+  const { page, setPage, totalPages, pageItems } = usePagedList(filtered, PAGE_SIZE);
   const isFiltered = Boolean(search.trim()) || mediaFilter !== "all";
 
   return (
@@ -97,7 +102,10 @@ export function StatsPage({ currentUser }) {
           </span>
         </div>
 
-        <StudentActivityTable students={filtered} isLoading={analytics.isLoading} isFiltered={isFiltered} />
+        <StudentActivityTable students={pageItems} startIndex={(page - 1) * PAGE_SIZE + 1} isLoading={analytics.isLoading} isFiltered={isFiltered} />
+        <div className="border-t border-slate-100 px-4 py-3">
+          <Pagination currentPage={page} totalPages={totalPages} totalItems={filtered.length} itemsPerPage={PAGE_SIZE} onPageChange={setPage} itemName="siswa" />
+        </div>
       </Card>
     </div>
   );

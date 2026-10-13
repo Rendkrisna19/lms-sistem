@@ -14,6 +14,7 @@ import { CoursesPage } from "./pages/CoursesPage";
 import { MaterialsPage } from "./pages/MaterialsPage";
 import { GradesPage } from "./pages/GradesPage";
 import { StatsPage } from "./pages/StatsPage";
+import { ManajemenUserPage } from "./pages/ManajemenUserPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { HelpPage } from "./pages/HelpPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
@@ -88,6 +89,7 @@ export const router = createBrowserRouter([
               { path: "guru", element: <WithUser component={TeachersPage} /> },
               { path: "siswa", element: <WithUser component={StudentsPage} /> },
               { path: "mapel", element: <WithUser component={CoursesPage} /> },
+              { path: "pengguna", element: <ManajemenUserPage /> },
               { path: "statistik", element: <WithUser component={StatsPage} /> },
             ],
           },

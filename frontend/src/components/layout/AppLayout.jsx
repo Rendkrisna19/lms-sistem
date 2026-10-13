@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
 import { Footer } from "./Footer";
+import { BottomNav } from "./BottomNav";
 import { useAuth } from "../../lib/auth";
 import { useExamLock } from "../../lib/examLock";
 import { cn } from "../../lib/utils";
@@ -36,11 +37,12 @@ export function AppLayout() {
 
       <div className={cn("flex-1 flex flex-col min-w-0 w-full transition-all duration-300 ease-in-out", isCollapsed ? "lg:pl-20" : "lg:pl-64")}>
         <Header currentUser={user} onOpenMobileMenu={() => setMobileOpen(true)} locked={locked} />
-        <main className="flex-1 w-full p-4 sm:p-6 lg:p-8 flex flex-col gap-6">
+        <main className={cn("flex-1 w-full p-4 sm:p-6 lg:p-8 flex flex-col gap-6", user?.role === "murid" && "pb-24 lg:pb-8")}>
           <Outlet />
           <Footer />
         </main>
       </div>
+      {user?.role === "murid" && <BottomNav />}
       <ScrollRestoration />
     </div>
   );

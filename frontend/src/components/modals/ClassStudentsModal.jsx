@@ -5,7 +5,6 @@ import { toast } from "sonner";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import { CustomSelect } from "../ui/custom-select";
-import { SchoolScopeNotice } from "../admin/SchoolScopeSelect";
 import { adminApi } from "../../features/admin/adminApi";
 import { useAdminResource } from "../../features/admin/useAdminResource";
 import { useApiQuery } from "../../hooks/useApiQuery";
@@ -107,7 +106,6 @@ function StudentsDialog({ classroom, onClose, onSuccess }) {
         </div>
 
         <div className="mt-4">
-          <SchoolScopeNotice scope={scope} />
         </div>
 
         {/* Quick Add Student Section */}

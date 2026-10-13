@@ -12,7 +12,7 @@ export function adminListUrl(resource, isMaster) {
 
 /** Nama berkas unduhan yang mudah dikenali, mis. "Daftar_Siswa_2026-10-14.xlsx". */
 function exportFileName(resource, format) {
-  const label = { teachers: "Guru", students: "Siswa", schools: "Sekolah" }[resource] ?? "Data";
+  const label = { teachers: "Guru", students: "Siswa", schools: "Sekolah", classrooms: "Kelas" }[resource] ?? "Data";
   return `Daftar_${label}_${new Date().toISOString().slice(0, 10)}.${format}`;
 }
 

@@ -1,7 +1,6 @@
 import { useId } from "react";
 import { Building2 } from "lucide-react";
 import { NativeSelect } from "../ui/native-select";
-import { Alert } from "../ui/alert";
 
 /** Pilihan sekolah untuk admin master. Tidak dirender untuk admin sekolah. */
 export function SchoolScopeSelect({ scope, className, allowAll = true }) {
@@ -36,15 +35,5 @@ export function SchoolScopeSelect({ scope, className, allowAll = true }) {
         </NativeSelect>
       </div>
     </div>
-  );
-}
-
-/** Pemberitahuan bahwa admin master harus memilih sekolah sebelum mengubah data. */
-export function SchoolScopeNotice({ scope }) {
-  if (!scope.isMaster || scope.canWrite) return null;
-  return (
-    <Alert variant="info" title="Mode lihat semua sekolah">
-      Pilih sekolah terlebih dahulu untuk mengelola data.
-    </Alert>
   );
 }

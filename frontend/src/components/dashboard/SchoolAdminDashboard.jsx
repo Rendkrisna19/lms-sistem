@@ -8,6 +8,7 @@ import { AdminMasterDataSection } from "./AdminMasterDataSection";
 import { BarChartCard } from "./BarChartCard";
 import { MediaPreferenceCard } from "./MediaPreferenceCard";
 import { useApiQuery } from "../../hooks/useApiQuery";
+import { SchoolIdentityCard } from "../school/SchoolIdentityCard";
 import { useAdminResource } from "../../features/admin/useAdminResource";
 import { countLabel } from "../../features/admin/format";
 
@@ -33,38 +34,22 @@ export function SchoolAdminDashboard({ currentUser, onNavigateTab }) {
 
   return (
     <div className="space-y-6 w-full">
-      {/* School Header Banner */}
-      <div className="bg-gradient-to-r from-blue-700 to-blue-600 rounded-3xl p-6 sm:p-8 text-white shadow-xl shadow-blue-500/10 flex flex-col md:flex-row md:items-center justify-between gap-6 relative overflow-hidden">
-        <div className="relative z-10 max-w-xl">
-          <Badge className="bg-white/20 text-white hover:bg-white/30 backdrop-blur-xs border-white/20 mb-3 text-xs font-semibold px-3 py-1">
-            Admin Sekolah Portal • {schoolName}
-          </Badge>
-          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white leading-tight">
-            Dashboard Akademik {schoolName}
-          </h1>
-          <p className="text-xs sm:text-sm text-blue-100 mt-2 leading-relaxed">
-            Manajemen operasional kurikulum, plotting rombel kelas, data pendidik, dan pemantauan peserta didik sekolah.
-          </p>
-        </div>
-
-        <div className="relative z-10 flex flex-wrap items-center gap-3">
-          <Button
-            onClick={() => onNavigateTab("kelas")}
-            className="rounded-xl bg-white text-blue-600 hover:bg-blue-50 font-bold text-xs h-10 px-4 shadow-md cursor-pointer"
-          >
-            <School className="h-4 w-4 mr-2" />
-            Plotting Rombel Kelas
-          </Button>
-          <Button
-            onClick={overview.reload}
-            variant="outline"
-            className="rounded-xl bg-white/10 hover:bg-white/20 text-white border-white/20 text-xs h-10 px-3 cursor-pointer"
-            title="Muat Ulang Data"
-          >
-            <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
-          </Button>
-        </div>
-      </div>
+      <SchoolIdentityCard
+        eyebrow={`Admin Sekolah Portal • ${schoolName}`}
+        title={`Dashboard Akademik ${schoolName}`}
+        description="Manajemen operasional kurikulum, plotting rombel kelas, data pendidik, dan pemantauan peserta didik sekolah."
+        actions={
+          <div className="flex items-center gap-2">
+            <Button onClick={() => onNavigateTab("kelas")} className="rounded-xl bg-white text-blue-600 hover:bg-blue-50 font-bold text-xs h-10 px-4 shadow-md cursor-pointer">
+              <School className="h-4 w-4 mr-2" />
+              Plotting Rombel Kelas
+            </Button>
+            <Button onClick={overview.reload} variant="outline" className="rounded-xl bg-white/10 hover:bg-white/20 text-white border-white/20 text-xs h-10 px-3 cursor-pointer" title="Muat Ulang Data">
+              <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
+            </Button>
+          </div>
+        }
+      />
 
       {/* Row 1: KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

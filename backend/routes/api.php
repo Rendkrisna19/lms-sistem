@@ -6,6 +6,8 @@ use App\Http\Controllers\Api\LessonController;
 use App\Http\Controllers\Api\MasterAdminController;
 use App\Http\Controllers\Api\SchoolAdminController;
 use App\Http\Controllers\Api\AdminUserSpreadsheetController;
+use App\Http\Controllers\Api\ClassroomExportController;
+use App\Http\Controllers\Api\SchoolProfileController;
 use App\Http\Controllers\Api\TeacherDashboardController;
 use App\Http\Controllers\Api\StudentDashboardController;
 use App\Http\Controllers\Api\StudentQuizController;
@@ -81,6 +83,15 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('/courses', [SchoolAdminController::class, 'createCourse']);
             Route::put('/courses/{id}', [SchoolAdminController::class, 'updateCourse']);
             Route::delete('/courses/{id}', [SchoolAdminController::class, 'deleteCourse']);
+
+            Route::post('/classrooms/export', [ClassroomExportController::class, 'export']);
+
+            // Profil sekolah, akun sekolah, dan manajemen admin sekolah
+            Route::get('/school', [SchoolProfileController::class, 'show']);
+            Route::post('/school', [SchoolProfileController::class, 'update']);
+            Route::get('/accounts', [SchoolProfileController::class, 'accounts']);
+            Route::post('/admins', [SchoolProfileController::class, 'storeAdmin']);
+            Route::delete('/admins/{id}', [SchoolProfileController::class, 'destroyAdmin']);
 
             // Template, impor, dan ekspor Excel/PDF untuk data guru dan siswa
             Route::get('/{resource}/template', [AdminUserSpreadsheetController::class, 'template'])
