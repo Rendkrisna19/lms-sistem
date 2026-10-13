@@ -24,7 +24,7 @@ export function RequireAuth() {
 
   if (isVerifying && !user) return <FullScreenLoader />;
   if (!isAuthenticated) {
-    return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />;
+    return <Navigate to="/login" replace />;
   }
   return <Outlet />;
 }
@@ -39,9 +39,8 @@ export function RequireRole({ roles }) {
 /** Halaman login hanya untuk tamu. */
 export function GuestOnly() {
   const { isAuthenticated } = useAuth();
-  const location = useLocation();
   if (isAuthenticated) {
-    return <Navigate to={location.state?.from || "/dashboard"} replace />;
+    return <Navigate to="/dashboard" replace />;
   }
   return <Outlet />;
 }

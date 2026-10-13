@@ -5,6 +5,7 @@ import { Field } from "../ui/field";
 import { Input } from "../ui/input";
 import { Button } from "../ui/button";
 import { api, getErrorMessage, getValidationErrors } from "../../lib/api";
+import { controlProps, useFormState } from "../../hooks/useFormState";
 
 const MIN_PASSWORD = 8;
 
@@ -26,27 +27,21 @@ export function TeacherModal({ isOpen, onClose, onSuccess, teacherToEdit = null,
 
 function TeacherForm({ teacher, onClose, onSuccess, scopeParams }) {
   const isEditing = Boolean(teacher);
-  const [form, setForm] = useState(() => ({
+  const { values, bind, errors, setErrors } = useFormState({
     name: teacher?.name ?? "",
     nomor_induk: teacher?.nomor_induk ?? "",
     email: teacher?.email ?? "",
     password: "",
-  }));
-  const [errors, setErrors] = useState({});
+  });
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const setField = (field) => (e) => {
-    setForm((prev) => ({ ...prev, [field]: e.target.value }));
-    setErrors((prev) => ({ ...prev, [field]: undefined }));
-  };
 
   const validate = () => {
     const next = {};
-    if (!form.name.trim()) next.name = "Nama wajib diisi.";
-    if (!form.nomor_induk.trim()) next.nomor_induk = "NIP wajib diisi.";
-    if (!form.email.trim()) next.email = "Email wajib diisi.";
-    if (!isEditing && !form.password) next.password = "Kata sandi wajib diisi.";
-    if (form.password && form.password.length < MIN_PASSWORD) next.password = `Kata sandi minimal ${MIN_PASSWORD} karakter.`;
+    if (!values.name.trim()) next.name = "Nama wajib diisi.";
+    if (!values.nomor_induk.trim()) next.nomor_induk = "NIP wajib diisi.";
+    if (!values.email.trim()) next.email = "Email wajib diisi.";
+    if (!isEditing && !values.password) next.password = "Kata sandi wajib diisi.";
+    else if (values.password && values.password.length < MIN_PASSWORD) next.password = `Kata sandi minimal ${MIN_PASSWORD} karakter.`;
     return next;
   };
 
@@ -60,11 +55,11 @@ function TeacherForm({ teacher, onClose, onSuccess, scopeParams }) {
 
     const payload = {
       ...scopeParams,
-      name: form.name.trim(),
-      nomor_induk: form.nomor_induk.trim(),
-      email: form.email.trim(),
+      name: values.name.trim(),
+      nomor_induk: values.nomor_induk.trim(),
+      email: values.email.trim(),
     };
-    if (form.password) payload.password = form.password;
+    if (values.password) payload.password = values.password;
 
     setIsSubmitting(true);
     try {
@@ -88,41 +83,15 @@ function TeacherForm({ teacher, onClose, onSuccess, scopeParams }) {
   return (
     <form onSubmit={handleSubmit} noValidate className="space-y-4">
       <Field label="Nama lengkap" htmlFor="teacher-name" required error={errors.name}>
-        <Input
-          id="teacher-name"
-          value={form.name}
-          onChange={setField("name")}
-          placeholder="Contoh: Yulia Rahmawati, S.Pd."
-          aria-invalid={Boolean(errors.name)}
-          aria-describedby={errors.name ? "teacher-name-error" : undefined}
-          autoComplete="off"
-        />
+        <Input {...controlProps("teacher-name", errors.name)} {...bind("name")} placeholder="Contoh: Yulia Rahmawati, S.Pd." autoComplete="off" />
       </Field>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <Field label="NIP" htmlFor="teacher-nip" required error={errors.nomor_induk}>
-          <Input
-            id="teacher-nip"
-            value={form.nomor_induk}
-            onChange={setField("nomor_induk")}
-            placeholder="Nomor Induk Pegawai"
-            className="font-mono"
-            aria-invalid={Boolean(errors.nomor_induk)}
-            aria-describedby={errors.nomor_induk ? "teacher-nip-error" : undefined}
-            autoComplete="off"
-          />
+          <Input {...controlProps("teacher-nip", errors.nomor_induk)} {...bind("nomor_induk")} placeholder="Nomor Induk Pegawai" className="font-mono" autoComplete="off" />
         </Field>
         <Field label="Email" htmlFor="teacher-email" required error={errors.email}>
-          <Input
-            id="teacher-email"
-            type="email"
-            value={form.email}
-            onChange={setField("email")}
-            placeholder="guru@sekolah.sch.id"
-            aria-invalid={Boolean(errors.email)}
-            aria-describedby={errors.email ? "teacher-email-error" : undefined}
-            autoComplete="off"
-          />
+          <Input {...controlProps("teacher-email", errors.email)} {...bind("email")} type="email" placeholder="guru@sekolah.sch.id" autoComplete="off" />
         </Field>
       </div>
 
@@ -133,15 +102,7 @@ function TeacherForm({ teacher, onClose, onSuccess, scopeParams }) {
         hint={isEditing ? `Kosongkan jika tidak diubah. Minimal ${MIN_PASSWORD} karakter.` : `Minimal ${MIN_PASSWORD} karakter.`}
         error={errors.password}
       >
-        <Input
-          id="teacher-password"
-          type="password"
-          value={form.password}
-          onChange={setField("password")}
-          autoComplete="new-password"
-          aria-invalid={Boolean(errors.password)}
-          aria-describedby={errors.password ? "teacher-password-error" : undefined}
-        />
+        <Input {...controlProps("teacher-password", errors.password)} {...bind("password")} type="password" autoComplete="new-password" />
       </Field>
 
       <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 pt-2">

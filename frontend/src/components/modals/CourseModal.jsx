@@ -1,177 +1,108 @@
-import React, { useState, useEffect } from "react";
-import { X, BookMarked, Edit3, BookOpen, GraduationCap } from "lucide-react";
-import { Button } from "../ui/button";
-import { Input } from "../ui/input";
-import { CustomSelect } from "../ui/custom-select";
-import { api } from "../../lib/api";
+import { useState } from "react";
 import { toast } from "sonner";
+import { Dialog } from "../ui/dialog";
+import { Field } from "../ui/field";
+import { Input } from "../ui/input";
+import { Textarea } from "../ui/textarea";
+import { NativeSelect } from "../ui/native-select";
+import { Button } from "../ui/button";
+import { api, getErrorMessage, getValidationErrors } from "../../lib/api";
+import { controlProps, useFormState } from "../../hooks/useFormState";
 
-export function CourseModal({ isOpen, onClose, onSuccess, courseToEdit = null, teachers = [] }) {
-  const isEditing = Boolean(courseToEdit);
+export function CourseModal({ isOpen, onClose, onSuccess, courseToEdit = null, teachers = [], scopeParams = {} }) {
+  return (
+    <Dialog
+      open={isOpen}
+      onClose={onClose}
+      title={courseToEdit ? "Edit Mata Pelajaran" : "Tambah Mata Pelajaran"}
+      description="Mata pelajaran beserta guru pengampu utamanya."
+    >
+      <CourseForm key={courseToEdit?.id ?? "new"} course={courseToEdit} teachers={teachers} onClose={onClose} onSuccess={onSuccess} scopeParams={scopeParams} />
+    </Dialog>
+  );
+}
 
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [instructorId, setInstructorId] = useState("");
+function CourseForm({ course, teachers, onClose, onSuccess, scopeParams }) {
+  const isEditing = Boolean(course);
+  const { values, bind, errors, setErrors } = useFormState({
+    title: course?.title ?? "",
+    description: course?.description ?? "",
+    instructor_id: course?.instructor_id ? String(course.instructor_id) : "",
+  });
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  useEffect(() => {
-    if (courseToEdit) {
-      setTitle(courseToEdit.title || "");
-      setDescription(courseToEdit.description || "");
-      setInstructorId(courseToEdit.instructor_id || courseToEdit.instructor?.id || (teachers[0]?.id || ""));
-    } else {
-      setTitle("");
-      setDescription("");
-      setInstructorId(teachers[0]?.id || "");
-    }
-  }, [courseToEdit, isOpen, teachers]);
-
-  if (!isOpen) return null;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!title.trim()) {
-      toast.error("Nama Mata Pelajaran wajib diisi.");
+    const clientErrors = {};
+    if (!values.title.trim()) clientErrors.title = "Nama mata pelajaran wajib diisi.";
+    if (!values.instructor_id) clientErrors.instructor_id = "Pilih guru pengampu.";
+    if (Object.keys(clientErrors).length) {
+      setErrors(clientErrors);
       return;
     }
 
+    const payload = {
+      ...scopeParams,
+      title: values.title.trim(),
+      description: values.description.trim() || null,
+      instructor_id: Number(values.instructor_id),
+    };
+
     setIsSubmitting(true);
     try {
-      const payload = {
-        title: title.trim(),
-        description: description.trim() || "Mata pelajaran kurikulum semester aktif",
-        instructor_id: instructorId || (teachers[0]?.id ?? 1),
-      };
-
       if (isEditing) {
-        const res = await api.put(`/admin/courses/${courseToEdit.id}`, payload);
-        if (res.data?.status === "success") {
-          toast.success(`Mata Pelajaran "${title}" berhasil diperbarui!`);
-          onSuccess();
-          onClose();
-        }
+        await api.put(`/admin/courses/${course.id}`, payload);
+        toast.success(`Mata pelajaran "${payload.title}" berhasil diperbarui.`);
       } else {
-        const res = await api.post("/admin/courses", payload);
-        if (res.data?.status === "success") {
-          toast.success(`Mata Pelajaran "${title}" berhasil ditambahkan ke kurikulum!`);
-          onSuccess();
-          onClose();
-        }
+        await api.post("/admin/courses", payload);
+        toast.success(`Mata pelajaran "${payload.title}" berhasil ditambahkan.`);
       }
+      onSuccess?.();
+      onClose();
     } catch (err) {
-      const msg =
-        err.response?.data?.message ||
-        (err.response?.data?.errors
-          ? Object.values(err.response.data.errors).flat().join(", ")
-          : "Gagal menyimpan mata pelajaran.");
-      toast.error(msg);
+      setErrors(getValidationErrors(err));
+      toast.error(getErrorMessage(err, "Gagal menyimpan mata pelajaran."));
     } finally {
       setIsSubmitting(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs animate-in fade-in duration-150">
-      <div
-        className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl border border-slate-100 p-6 overflow-visible animate-in zoom-in-95 duration-200"
-        onClick={(e) => e.stopPropagation()}
+    <form onSubmit={handleSubmit} noValidate className="space-y-4">
+      <Field label="Nama mata pelajaran" htmlFor="course-title" required error={errors.title}>
+        <Input {...controlProps("course-title", errors.title)} {...bind("title")} placeholder="Contoh: Matematika Wajib" autoComplete="off" />
+      </Field>
+
+      <Field
+        label="Guru pengampu"
+        htmlFor="course-instructor"
+        required
+        error={errors.instructor_id}
+        hint={teachers.length === 0 ? "Belum ada guru di sekolah ini. Tambahkan guru terlebih dahulu." : undefined}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between pb-4 border-b border-slate-100">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
-              {isEditing ? <Edit3 className="h-5 w-5" /> : <BookMarked className="h-5 w-5" />}
-            </div>
-            <div>
-              <h3 className="text-base font-bold text-slate-900">
-                {isEditing ? "Edit Mata Pelajaran / Silabus" : "Tambah Mata Pelajaran Baru"}
-              </h3>
-              <p className="text-xs text-slate-400">
-                {isEditing
-                  ? "Perbarui informasi silabus dan guru pengampu aktif"
-                  : "Daftarkan mata pelajaran baru ke kurikulum sekolah aktif"}
-              </p>
-            </div>
-          </div>
+        <NativeSelect {...controlProps("course-instructor", errors.instructor_id)} {...bind("instructor_id")} disabled={teachers.length === 0}>
+          <option value="">Pilih guru…</option>
+          {teachers.map((t) => (
+            <option key={t.id} value={String(t.id)}>
+              {t.name}
+              {t.nomor_induk ? ` — NIP ${t.nomor_induk}` : ""}
+            </option>
+          ))}
+        </NativeSelect>
+      </Field>
 
-          <button
-            onClick={onClose}
-            disabled={isSubmitting}
-            className="text-slate-400 hover:text-slate-600 rounded-full p-1 transition-colors cursor-pointer"
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
+      <Field label="Deskripsi" htmlFor="course-description" error={errors.description}>
+        <Textarea {...controlProps("course-description", errors.description)} {...bind("description")} rows={3} placeholder="Ringkasan cakupan materi (opsional)" />
+      </Field>
 
-        {/* Form Body */}
-        <form onSubmit={handleSubmit} className="mt-5 space-y-4">
-          <div>
-            <label className="text-xs font-semibold text-slate-700 block mb-1.5">
-              Nama Mata Pelajaran
-            </label>
-            <div className="relative">
-              <BookOpen className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-              <Input
-                required
-                placeholder="Contoh: Algoritma & Struktur Data"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                className="pl-10 text-xs rounded-xl"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="text-xs font-semibold text-slate-700 block mb-1.5">
-              Deskripsi Silabus / Materi
-            </label>
-            <textarea
-              rows={3}
-              placeholder="Ringkasan cakupan materi pembelajaran, konsep praktikum, dsb..."
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className="w-full rounded-xl border border-slate-200 p-3 text-xs focus:outline-none focus:ring-2 focus:ring-brand-500"
-            />
-          </div>
-
-          <div className="relative z-20">
-            <label className="text-xs font-semibold text-slate-700 block mb-1.5">
-              Guru Pengampu Resmi
-            </label>
-            <CustomSelect
-              value={instructorId}
-              onChange={(val) => setInstructorId(val)}
-              options={teachers.map((t) => ({
-                value: t.id,
-                label: t.name,
-                description: `NIP: ${t.nomor_induk || t.nim_nip || "-"}`,
-                icon: GraduationCap,
-              }))}
-              placeholder="Pilih Guru Pengampu..."
-              icon={GraduationCap}
-            />
-          </div>
-
-          <div className="pt-4 border-t border-slate-100 flex items-center justify-end gap-2.5">
-            <Button
-              type="button"
-              variant="outline"
-              disabled={isSubmitting}
-              onClick={onClose}
-              className="rounded-xl text-xs"
-            >
-              Batal
-            </Button>
-            <Button
-              type="submit"
-              disabled={isSubmitting}
-              className="rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs px-5 shadow-sm"
-            >
-              {isSubmitting ? "Menyimpan..." : isEditing ? "Simpan Perubahan" : "Daftarkan Mapel"}
-            </Button>
-          </div>
-        </form>
+      <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 pt-2">
+        <Button type="button" variant="outline" onClick={onClose} disabled={isSubmitting}>
+          Batal
+        </Button>
+        <Button type="submit" isLoading={isSubmitting}>
+          {isEditing ? "Simpan Perubahan" : "Tambah Mapel"}
+        </Button>
       </div>
-    </div>
+    </form>
   );
 }

@@ -71,7 +71,7 @@ export function LoginPage() {
     try {
       const user = await login(trimmedId, passwordInput);
       toast.success(`Selamat datang kembali, ${user.name}!`);
-      navigate(location.state?.from || "/dashboard", { replace: true });
+      navigate("/dashboard", { replace: true });
     } catch (err) {
       const respErrors = err.response?.data?.errors;
       const respMsg = err.response?.data?.message;
