@@ -4,19 +4,11 @@ import { Badge } from "../../ui/badge";
 import { buttonVariants } from "../../ui/button";
 import { formatDateTime, formatRelativeFuture } from "../../../lib/datetime";
 import { cn } from "../../../lib/utils";
-
-/** Status tampilan kartu ujian dari sudut pandang siswa. */
-export function studentQuizState(quiz) {
-  const attempt = quiz.attempt;
-  if (attempt && attempt.status !== "in_progress") return "finished";
-  if (attempt?.status === "in_progress") return "in_progress";
-  if (quiz.status_state === "upcoming") return "upcoming";
-  if (quiz.status_state === "closed") return "closed";
-  return quiz.can_start ? "available" : "unavailable";
-}
+import { studentQuizState } from "../../../features/quiz/studentQuizState";
 
 const STATE_META = {
   available: { label: "Tersedia", variant: "success" },
+  retake: { label: "Ujian ulang", variant: "warning" },
   in_progress: { label: "Sedang dikerjakan", variant: "indigo" },
   upcoming: { label: "Belum dibuka", variant: "muted" },
   closed: { label: "Ditutup", variant: "warning" },
@@ -105,7 +97,7 @@ export function StudentQuizCard({ quiz }) {
             className={buttonVariants({ className: "w-full", variant: state === "in_progress" ? "secondary" : "default" })}
           >
             <PlayCircle className="h-4 w-4" aria-hidden="true" />
-            {state === "in_progress" ? "Lanjutkan Ujian" : "Mulai Kerjakan"}
+            {state === "in_progress" ? "Lanjutkan Ujian" : state === "retake" ? "Mulai Ujian Ulang" : "Mulai Kerjakan"}
             <ChevronRight className="h-4 w-4 ml-auto" aria-hidden="true" />
           </Link>
         )}

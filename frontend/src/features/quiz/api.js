@@ -13,6 +13,8 @@ export const quizApi = {
   remove: (id) => api.delete(`/teacher/quizzes/${id}`).then((res) => res.data),
   grades: (id, config) => api.get(`/teacher/quizzes/${id}/grades`, config).then((res) => res.data.data),
   exportCsv: (id, title = "ujian") => downloadFromApi(`/teacher/quizzes/${id}/export-csv`, `rekap-nilai-${title}.csv`),
+  grantRetake: (id, studentId) => api.post(`/teacher/quizzes/${id}/students/${studentId}/retake`).then((res) => res.data),
+  revokeRetake: (id, studentId) => api.delete(`/teacher/quizzes/${id}/students/${studentId}/retake`).then((res) => res.data),
   uploadImage: (file) => {
     const formData = new FormData();
     formData.append("image", file);

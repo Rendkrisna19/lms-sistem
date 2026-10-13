@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\School;
 use App\Models\User;
 use App\Support\AttemptStats;
+use App\Support\Spreadsheet\SchoolExporter;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -30,6 +31,40 @@ class SchoolController extends Controller
         return response()->json([
             'status' => 'success',
             'data' => $schools,
+        ]);
+    }
+
+    /**
+     * Ekspor daftar sekolah ke .xlsx atau .pdf. Jika ids dikirim, hanya baris tersebut yang diekspor.
+     */
+    public function export(Request $request)
+    {
+        $validated = $request->validate([
+            'format' => 'required|in:xlsx,pdf',
+            'ids' => 'nullable|array|max:5000',
+            'ids.*' => 'integer',
+        ]);
+
+        $query = School::with(self::ADMIN_COLUMNS)->withCount(self::COUNTS);
+        if (($validated['ids'] ?? null) !== null) {
+            $ids = array_values(array_unique(array_map('intval', $validated['ids'])));
+            $query->whereIn('id', $ids);
+            $schools = $query->get()->sortBy(fn (School $school) => array_search($school->id, $ids, true))->values();
+        } else {
+            $schools = $query->orderBy('name')->get();
+        }
+
+        $base = 'Daftar_Sekolah_' . now('Asia/Jakarta')->format('Y-m-d');
+        if ($validated['format'] === 'pdf') {
+            return response(SchoolExporter::toPdf($schools), 200, [
+                'Content-Type' => 'application/pdf',
+                'Content-Disposition' => "attachment; filename=\"{$base}.pdf\"",
+            ]);
+        }
+
+        return response(SchoolExporter::toXlsx($schools), 200, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Content-Disposition' => "attachment; filename=\"{$base}.xlsx\"",
         ]);
     }
 

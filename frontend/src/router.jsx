@@ -24,6 +24,8 @@ import { QuizEditorPage } from "./pages/quiz/QuizEditorPage";
 import { QuizDetailPage } from "./pages/quiz/QuizDetailPage";
 import { StudentQuizListPage } from "./pages/quiz/StudentQuizListPage";
 import { ExamRoomPage } from "./pages/quiz/ExamRoomPage";
+import { AssignmentsPage } from "./pages/tugas/AssignmentsPage";
+import { AssignmentDetailPage } from "./pages/tugas/AssignmentDetailPage";
 
 const { ADMIN_MASTER, ADMIN, TEACHER, STUDENT } = ROLES;
 
@@ -117,7 +119,11 @@ export const router = createBrowserRouter([
           // Guru & siswa
           {
             element: <RequireRole roles={[TEACHER, STUDENT]} />,
-            children: [{ path: "ujian", element: <QuizIndexRoute /> }],
+            children: [
+              { path: "ujian", element: <QuizIndexRoute /> },
+              { path: "tugas", element: <AssignmentsPage /> },
+              { path: "tugas/:assignmentId", element: <AssignmentDetailPage /> },
+            ],
           },
 
           // URL lama

@@ -12,6 +12,7 @@ use App\Models\Quiz;
 use App\Models\School;
 use App\Models\User;
 use App\Support\LearningAnalytics;
+use App\Support\UserProfile;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
@@ -146,6 +147,7 @@ class SchoolAdminController extends Controller
         $teachers = User::where('role', 'guru')
             ->where('school_id', $schoolId)
             ->with('school:id,name,npsn')
+            ->withCount('teachingAssignments')
             ->orderBy('id', 'desc')
             ->get();
 
@@ -163,9 +165,9 @@ class SchoolAdminController extends Controller
             'nomor_induk' => 'required|string|max:50|unique:users,nomor_induk',
             'email' => 'required|email|max:255|unique:users,email',
             'password' => 'required|string|min:8',
-        ], $this->scopeMessages());
+        ] + UserProfile::rules('guru'), $this->scopeMessages());
 
-        $teacher = User::create([
+        $teacher = User::create(UserProfile::fromValidated($validated, 'guru') + [
             'name' => $validated['name'],
             'nomor_induk' => $validated['nomor_induk'],
             'nim_nip' => $validated['nomor_induk'],
@@ -192,12 +194,13 @@ class SchoolAdminController extends Controller
             'nomor_induk' => ['required', 'string', 'max:50', Rule::unique('users', 'nomor_induk')->ignore($teacher->id)],
             'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')->ignore($teacher->id)],
             'password' => 'nullable|string|min:8',
-        ], $this->scopeMessages());
+        ] + UserProfile::rules('guru'), $this->scopeMessages());
 
         $teacher->name = $validated['name'];
         $teacher->nomor_induk = $validated['nomor_induk'];
         $teacher->nim_nip = $validated['nomor_induk'];
         $teacher->email = $validated['email'];
+        $teacher->fill(UserProfile::fromValidated($validated, 'guru'));
         $passwordChanged = $this->applyPassword($teacher, $validated['password'] ?? null);
         $teacher->save();
 
@@ -272,9 +275,9 @@ class SchoolAdminController extends Controller
             'email' => 'required|email|max:255|unique:users,email',
             'classroom_id' => ['nullable', 'integer', $this->classroomOfSchool($schoolId)],
             'password' => 'required|string|min:8',
-        ], $this->scopeMessages());
+        ] + UserProfile::rules('murid'), $this->scopeMessages());
 
-        $student = User::create([
+        $student = User::create(UserProfile::fromValidated($validated, 'murid') + [
             'name' => $validated['name'],
             'nomor_induk' => $validated['nomor_induk'],
             'nim_nip' => $validated['nomor_induk'],
@@ -303,12 +306,13 @@ class SchoolAdminController extends Controller
             'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')->ignore($student->id)],
             'classroom_id' => ['nullable', 'integer', $this->classroomOfSchool($schoolId)],
             'password' => 'nullable|string|min:8',
-        ], $this->scopeMessages());
+        ] + UserProfile::rules('murid'), $this->scopeMessages());
 
         $student->name = $validated['name'];
         $student->nomor_induk = $validated['nomor_induk'];
         $student->nim_nip = $validated['nomor_induk'];
         $student->email = $validated['email'];
+        $student->fill(UserProfile::fromValidated($validated, 'murid'));
         if ($request->has('classroom_id')) {
             $student->classroom_id = $validated['classroom_id'] ?? null;
         }

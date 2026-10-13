@@ -6,24 +6,31 @@ import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
 import { NativeSelect } from "../ui/native-select";
 import { Button } from "../ui/button";
-import { api, getErrorMessage, getValidationErrors } from "../../lib/api";
+import { SchoolScopeNotice } from "../admin/SchoolScopeSelect";
+import { adminApi } from "../../features/admin/adminApi";
+import { useAdminResource } from "../../features/admin/useAdminResource";
+import { getErrorMessage, getValidationErrors } from "../../lib/api";
 import { controlProps, useFormState } from "../../hooks/useFormState";
 
-export function CourseModal({ isOpen, onClose, onSuccess, courseToEdit = null, teachers = [], scopeParams = {} }) {
+/** Tambah / edit mata pelajaran. Daftar guru pengampu mengikuti cakupan sekolah (admin master). */
+export function CourseModal({ isOpen, onClose, onSuccess, courseToEdit = null }) {
+  if (!isOpen) return null;
+
   return (
     <Dialog
-      open={isOpen}
+      open
       onClose={onClose}
       title={courseToEdit ? "Edit Mata Pelajaran" : "Tambah Mata Pelajaran"}
       description="Mata pelajaran beserta guru pengampu utamanya."
     >
-      <CourseForm key={courseToEdit?.id ?? "new"} course={courseToEdit} teachers={teachers} onClose={onClose} onSuccess={onSuccess} scopeParams={scopeParams} />
+      <CourseForm course={courseToEdit} onClose={onClose} onSuccess={onSuccess} />
     </Dialog>
   );
 }
 
-function CourseForm({ course, teachers, onClose, onSuccess, scopeParams }) {
+function CourseForm({ course, onClose, onSuccess }) {
   const isEditing = Boolean(course);
+  const { rows: teachers, scope } = useAdminResource("teachers");
   const { values, bind, errors, setErrors } = useFormState({
     title: course?.title ?? "",
     description: course?.description ?? "",
@@ -33,6 +40,7 @@ function CourseForm({ course, teachers, onClose, onSuccess, scopeParams }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!scope.canWrite) return;
     const clientErrors = {};
     if (!values.title.trim()) clientErrors.title = "Nama mata pelajaran wajib diisi.";
     if (!values.instructor_id) clientErrors.instructor_id = "Pilih guru pengampu.";
@@ -42,7 +50,6 @@ function CourseForm({ course, teachers, onClose, onSuccess, scopeParams }) {
     }
 
     const payload = {
-      ...scopeParams,
       title: values.title.trim(),
       description: values.description.trim() || null,
       instructor_id: Number(values.instructor_id),
@@ -51,10 +58,10 @@ function CourseForm({ course, teachers, onClose, onSuccess, scopeParams }) {
     setIsSubmitting(true);
     try {
       if (isEditing) {
-        await api.put(`/admin/courses/${course.id}`, payload);
+        await adminApi.update("courses", course.id, payload, scope.params);
         toast.success(`Mata pelajaran "${payload.title}" berhasil diperbarui.`);
       } else {
-        await api.post("/admin/courses", payload);
+        await adminApi.create("courses", payload, scope.params);
         toast.success(`Mata pelajaran "${payload.title}" berhasil ditambahkan.`);
       }
       onSuccess?.();
@@ -69,6 +76,8 @@ function CourseForm({ course, teachers, onClose, onSuccess, scopeParams }) {
 
   return (
     <form onSubmit={handleSubmit} noValidate className="space-y-4">
+      <SchoolScopeNotice scope={scope} />
+
       <Field label="Nama mata pelajaran" htmlFor="course-title" required error={errors.title}>
         <Input {...controlProps("course-title", errors.title)} {...bind("title")} placeholder="Contoh: Matematika Wajib" autoComplete="off" />
       </Field>
@@ -99,7 +108,7 @@ function CourseForm({ course, teachers, onClose, onSuccess, scopeParams }) {
         <Button type="button" variant="outline" onClick={onClose} disabled={isSubmitting}>
           Batal
         </Button>
-        <Button type="submit" isLoading={isSubmitting}>
+        <Button type="submit" isLoading={isSubmitting} disabled={!scope.canWrite}>
           {isEditing ? "Simpan Perubahan" : "Tambah Mapel"}
         </Button>
       </div>

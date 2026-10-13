@@ -3,7 +3,7 @@ import { X, Building2, Edit3, Mail, Phone, MapPin, Hash, CheckCircle2, UserCheck
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { CustomSelect } from "../ui/custom-select";
-import { api } from "../../lib/api";
+import { adminApi } from "../../features/admin/adminApi";
 import { toast } from "sonner";
 
 export function SchoolModal({ isOpen, onClose, onSuccess, schoolToEdit = null }) {
@@ -79,15 +79,15 @@ export function SchoolModal({ isOpen, onClose, onSuccess, schoolToEdit = null })
       };
 
       if (isEditing) {
-        const res = await api.put(`/admin/schools/${schoolToEdit.id}`, payload);
-        if (res.data?.status === "success") {
+        const res = await adminApi.update("schools", schoolToEdit.id, payload);
+        if (res?.status === "success") {
           toast.success(`Data sekolah "${name}" berhasil diperbarui.`);
           onSuccess();
           onClose();
         }
       } else {
-        const res = await api.post("/admin/schools", payload);
-        if (res.data?.status === "success") {
+        const res = await adminApi.create("schools", payload);
+        if (res?.status === "success") {
           toast.success(`Sekolah baru "${name}" berhasil didaftarkan di Cendekia!`);
           onSuccess();
           onClose();

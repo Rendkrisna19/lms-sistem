@@ -1,47 +1,44 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { createPortal } from "react-dom";
-import { X, Users, UserPlus, Trash2, GraduationCap, Search, Mail, Hash } from "lucide-react";
+import { X, Users, UserPlus, Trash2, GraduationCap, Search } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import { CustomSelect } from "../ui/custom-select";
-import { api } from "../../lib/api";
-import { toast } from "sonner";
+import { SchoolScopeNotice } from "../admin/SchoolScopeSelect";
+import { adminApi } from "../../features/admin/adminApi";
+import { useAdminResource } from "../../features/admin/useAdminResource";
+import { useApiQuery } from "../../hooks/useApiQuery";
+import { getErrorMessage } from "../../lib/api";
 
-export function ClassStudentsModal({
-  isOpen,
-  onClose,
-  classroom = null,
-  allStudents = [],
-  onRefresh,
-  onSuccess,
-}) {
+/** Anggota siswa sebuah kelas: tambah dan keluarkan siswa. */
+export function ClassStudentsModal({ isOpen, onClose, onSuccess, classroom = null }) {
+  if (!isOpen || !classroom) return null;
+  return <StudentsDialog classroom={classroom} onClose={onClose} onSuccess={onSuccess} />;
+}
+
+function StudentsDialog({ classroom, onClose, onSuccess }) {
+  const allStudents = useAdminResource("students");
+  const scope = allStudents.scope;
+  const detail = useApiQuery(`/admin/classrooms/${classroom.id}`, { params: scope.params });
   const [selectedStudentToAdd, setSelectedStudentToAdd] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [search, setSearch] = useState("");
-  const [localStudents, setLocalStudents] = useState(classroom?.students || []);
 
-  React.useEffect(() => {
-    setLocalStudents(classroom?.students || []);
-  }, [classroom]);
-
-  if (!isOpen || !classroom) return null;
-
-  const currentStudents = localStudents;
-
-  // Filter students who are not in this class
-  const candidateStudents = allStudents.filter(
-    (s) => s.classroom_id !== classroom.id && !currentStudents.some((cs) => cs.id === s.id)
+  const enrolled = detail.data?.students ?? [];
+  const candidateStudents = allStudents.rows.filter(
+    (s) => String(s.classroom_id) !== String(classroom.id) && !enrolled.some((cs) => cs.id === s.id)
   );
-
-  const filteredEnrolled = currentStudents.filter((s) => {
-    if (!search.trim()) return true;
-    const q = search.toLowerCase();
+  const filteredEnrolled = enrolled.filter((s) => {
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
     return (s.name || "").toLowerCase().includes(q) || (s.nomor_induk || "").includes(q);
   });
 
-  const triggerRefresh = () => {
-    if (onRefresh) onRefresh();
-    if (onSuccess) onSuccess();
+  const refreshAfterChange = () => {
+    detail.reload();
+    allStudents.reload();
+    onSuccess?.();
   };
 
   const handleAddStudent = async () => {
@@ -52,20 +49,16 @@ export function ClassStudentsModal({
 
     setIsSubmitting(true);
     try {
-      const res = await api.post(`/admin/classrooms/${classroom.id}/assign-student`, {
-        student_id: selectedStudentToAdd,
-      });
-      if (res.data?.status === "success") {
-        toast.success(res.data.message);
-        const added = allStudents.find((s) => String(s.id) === String(selectedStudentToAdd));
-        if (added) {
-          setLocalStudents((prev) => [...prev, added]);
-        }
-        setSelectedStudentToAdd("");
-        triggerRefresh();
-      }
+      const res = await adminApi.create(
+        `classrooms/${classroom.id}/assign-student`,
+        { student_id: Number(selectedStudentToAdd) },
+        scope.params
+      );
+      toast.success(res.message);
+      setSelectedStudentToAdd("");
+      refreshAfterChange();
     } catch (err) {
-      toast.error("Gagal menambahkan siswa ke kelas.");
+      toast.error(getErrorMessage(err, "Gagal menambahkan siswa ke kelas."));
     } finally {
       setIsSubmitting(false);
     }
@@ -73,14 +66,11 @@ export function ClassStudentsModal({
 
   const handleRemoveStudent = async (studentId, studentName) => {
     try {
-      const res = await api.delete(`/admin/classrooms/${classroom.id}/students/${studentId}`);
-      if (res.data?.status === "success") {
-        toast.info(`Siswa ${studentName} dikeluarkan dari kelas.`);
-        setLocalStudents((prev) => prev.filter((s) => s.id !== studentId));
-        triggerRefresh();
-      }
+      await adminApi.remove(`classrooms/${classroom.id}/students`, studentId, scope.params);
+      toast.info(`Siswa ${studentName} dikeluarkan dari kelas.`);
+      refreshAfterChange();
     } catch (err) {
-      toast.error("Gagal mengeluarkan siswa dari kelas.");
+      toast.error(getErrorMessage(err, "Gagal mengeluarkan siswa dari kelas."));
     }
   };
 
@@ -98,12 +88,8 @@ export function ClassStudentsModal({
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="text-base font-bold text-slate-900">
-                  Daftar Siswa Kelas {classroom.code}
-                </h3>
-                <Badge className="bg-blue-50 text-blue-700 border-blue-200 text-xs">
-                  {currentStudents.length} Siswa Terdaftar
-                </Badge>
+                <h3 className="text-base font-bold text-slate-900">Daftar Siswa Kelas {classroom.code}</h3>
+                <Badge className="bg-blue-50 text-blue-700 border-blue-200 text-xs">{enrolled.length} Siswa Terdaftar</Badge>
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
                 {classroom.name} • Wali Kelas: {classroom.homeroom_teacher?.name || "Belum Ditentukan"}
@@ -112,6 +98,7 @@ export function ClassStudentsModal({
           </div>
 
           <button
+            type="button"
             onClick={onClose}
             className="text-slate-400 hover:text-slate-600 rounded-full p-1 transition-colors cursor-pointer"
           >
@@ -119,16 +106,18 @@ export function ClassStudentsModal({
           </button>
         </div>
 
+        <div className="mt-4">
+          <SchoolScopeNotice scope={scope} />
+        </div>
+
         {/* Quick Add Student Section */}
         <div className="mt-4 p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2.5">
-          <label className="text-xs font-bold text-slate-700 block">
-            Masukkan Siswa ke Kelas Ini:
-          </label>
+          <label className="text-xs font-bold text-slate-700 block">Masukkan Siswa ke Kelas Ini:</label>
           <div className="flex flex-col sm:flex-row items-center gap-2">
             <div className="flex-1 w-full">
               <CustomSelect
                 value={selectedStudentToAdd}
-                onChange={(val) => setSelectedStudentToAdd(val)}
+                onChange={setSelectedStudentToAdd}
                 options={candidateStudents.map((s) => ({
                   value: s.id,
                   label: s.name,
@@ -140,7 +129,7 @@ export function ClassStudentsModal({
             </div>
             <Button
               type="button"
-              disabled={isSubmitting || !selectedStudentToAdd}
+              disabled={isSubmitting || !selectedStudentToAdd || !scope.canWrite}
               onClick={handleAddStudent}
               className="w-full sm:w-auto rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs px-4 py-2.5 shrink-0 gap-1.5 shadow-xs cursor-pointer"
             >
@@ -163,16 +152,19 @@ export function ClassStudentsModal({
           </div>
 
           <div className="max-h-60 overflow-y-auto space-y-2 pr-1 divide-y divide-slate-100">
-            {filteredEnrolled.length === 0 ? (
+            {detail.error ? (
+              <div className="py-8 text-center text-xs text-red-500">{detail.error}</div>
+            ) : filteredEnrolled.length === 0 ? (
               <div className="py-8 text-center text-xs text-slate-400">
-                {search ? "Tidak ditemukan siswa yang cocok" : "Belum ada siswa yang dialokasikan ke kelas ini"}
+                {detail.isLoading
+                  ? "Memuat daftar siswa..."
+                  : search
+                  ? "Tidak ditemukan siswa yang cocok"
+                  : "Belum ada siswa yang dialokasikan ke kelas ini"}
               </div>
             ) : (
               filteredEnrolled.map((s) => (
-                <div
-                  key={s.id}
-                  className="pt-2 first:pt-0 flex items-center justify-between gap-3 p-2.5 rounded-xl hover:bg-slate-50 transition-colors"
-                >
+                <div key={s.id} className="pt-2 first:pt-0 flex items-center justify-between gap-3 p-2.5 rounded-xl hover:bg-slate-50 transition-colors">
                   <div className="flex items-center gap-2.5 min-w-0">
                     <div className="h-8 w-8 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center font-bold text-xs shrink-0">
                       {s.name.charAt(0)}
@@ -190,7 +182,8 @@ export function ClassStudentsModal({
                   <button
                     type="button"
                     onClick={() => handleRemoveStudent(s.id, s.name)}
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
+                    disabled={!scope.canWrite}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                     title="Keluarkan dari kelas"
                   >
                     <Trash2 className="h-4 w-4" />
@@ -201,13 +194,9 @@ export function ClassStudentsModal({
           </div>
         </div>
 
-        {/* Modal Footer (Strictly Pure Blue!) */}
+        {/* Modal Footer */}
         <div className="mt-4 pt-4 border-t border-slate-100 flex items-center justify-end">
-          <Button
-            type="button"
-            onClick={onClose}
-            className="rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs px-5 shadow-xs cursor-pointer"
-          >
+          <Button type="button" onClick={onClose} className="rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs px-5 shadow-xs cursor-pointer">
             Selesai
           </Button>
         </div>

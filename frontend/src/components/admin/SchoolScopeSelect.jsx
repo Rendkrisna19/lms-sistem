@@ -40,11 +40,11 @@ export function SchoolScopeSelect({ scope, className, allowAll = true }) {
 }
 
 /** Pemberitahuan bahwa admin master harus memilih sekolah sebelum mengubah data. */
-export function SchoolScopeNotice({ scope, what = "data" }) {
+export function SchoolScopeNotice({ scope }) {
   if (!scope.isMaster || scope.canWrite) return null;
   return (
     <Alert variant="info" title="Mode lihat semua sekolah">
-      Pilih satu sekolah pada filter untuk menambah, mengubah, atau menghapus {what}.
+      Pilih sekolah terlebih dahulu untuk mengelola data.
     </Alert>
   );
 }

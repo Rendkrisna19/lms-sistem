@@ -54,7 +54,7 @@ class MasterAdminController extends Controller
     public function allTeachers(Request $request)
     {
         $schoolId = $request->query('school_id');
-        $query = User::where('role', 'guru')->with('school:id,name,npsn');
+        $query = User::where('role', 'guru')->with('school:id,name,npsn')->withCount('teachingAssignments');
 
         if ($schoolId && $schoolId !== 'all') {
             $query->where('school_id', $schoolId);

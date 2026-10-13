@@ -48,6 +48,7 @@ export function QuizDetailPage() {
   const [error, setError] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
+  const [retakeBusyId, setRetakeBusyId] = useState(null);
   const [tab, setTab] = useState("grades");
   const [isToggling, setIsToggling] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
@@ -82,6 +83,21 @@ export function QuizDetailPage() {
       toast.error(getErrorMessage(err, "Gagal mengubah status ujian."));
     } finally {
       setIsToggling(false);
+    }
+  };
+
+  /** Buka atau cabut akses ujian ulang untuk satu siswa remedial. */
+  const handleRetake = async (row, action) => {
+    setRetakeBusyId(row.student_id);
+    try {
+      const request = action === "grant" ? quizApi.grantRetake : quizApi.revokeRetake;
+      const res = await request(quiz.id, row.student_id);
+      toast.success(res.message);
+      reload();
+    } catch (err) {
+      toast.error(getErrorMessage(err, "Gagal mengubah akses ujian ulang."));
+    } finally {
+      setRetakeBusyId(null);
     }
   };
 
@@ -176,7 +192,16 @@ export function QuizDetailPage() {
             <FileQuestion className="h-3.5 w-3.5" aria-hidden="true" /> Pratinjau Soal
           </TabsTrigger>
         </TabsList>
-        <TabsContent value="grades">{grades && <GradesPanel grades={grades} />}</TabsContent>
+        <TabsContent value="grades">
+          {grades && (
+            <GradesPanel
+              grades={grades}
+              busyStudentId={retakeBusyId}
+              onGrantRetake={(row) => handleRetake(row, "grant")}
+              onRevokeRetake={(row) => handleRetake(row, "revoke")}
+            />
+          )}
+        </TabsContent>
         <TabsContent value="analysis">
           {grades && <ItemAnalysisPanel items={grades.item_analysis} finishedCount={grades.summary.finished} />}
         </TabsContent>

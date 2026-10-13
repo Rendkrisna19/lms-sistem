@@ -43,23 +43,24 @@ export function useExamSession(session, { onFinished }) {
     const pending = readJson(storageKey(attemptId, "pending"), {});
     return { ...session.answers, ...pending };
   });
-  const [flags, setFlags] = useState(() => readJson(storageKey(attemptId, "flags"), {}));
   const [remaining, setRemaining] = useState(() => computeRemainingSeconds(deadline, clockOffset));
   const [saveState, setSaveState] = useState({ status: "idle", savedAt: null });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const pendingRef = useRef(readJson(storageKey(attemptId, "pending"), {}));
-  const flushingRef = useRef(false);
+  /** Promise pengiriman yang sedang berjalan (null bila tidak ada). */
+  const flushingRef = useRef(null);
   const retryTimer = useRef(null);
   const retryDelay = useRef(2000);
   const finishedRef = useRef(false);
   const warned = useRef({ five: false, one: false });
   const onFinishedRef = useRef(onFinished);
-  onFinishedRef.current = onFinished;
+  useEffect(() => {
+    onFinishedRef.current = onFinished;
+  }, [onFinished]);
 
   const clearLocal = useCallback(() => {
     localStorage.removeItem(storageKey(attemptId, "pending"));
-    localStorage.removeItem(storageKey(attemptId, "flags"));
   }, [attemptId]);
 
   const finish = useCallback(
@@ -73,57 +74,79 @@ export function useExamSession(session, { onFinished }) {
     [clearLocal]
   );
 
-  /** Kirim semua jawaban yang tertunda satu per satu. */
-  const flush = useCallback(async () => {
-    if (flushingRef.current || finishedRef.current) return true;
-    const entries = Object.entries(pendingRef.current);
-    if (entries.length === 0) return true;
+  /**
+   * Kirim semua jawaban yang tertunda satu per satu. Bila pengiriman sedang berjalan,
+   * promise yang sama dikembalikan agar pemanggil (mis. submit) dapat menunggunya.
+   * Hasil: true bila antrean terkirim seluruhnya.
+   */
+  const flush = useCallback(() => {
+    if (finishedRef.current) return Promise.resolve(true);
+    if (flushingRef.current) return flushingRef.current;
+    if (Object.keys(pendingRef.current).length === 0) return Promise.resolve(true);
 
-    flushingRef.current = true;
-    setSaveState((prev) => ({ ...prev, status: "saving" }));
-    clearTimeout(retryTimer.current);
+    const dropPending = (questionId) => {
+      delete pendingRef.current[questionId];
+      writeJson(storageKey(attemptId, "pending"), pendingRef.current);
+    };
 
-    try {
-      for (const [questionId, optionId] of entries) {
-        await quizApi.saveAnswer(attemptId, Number(questionId), optionId);
-        // Hapus dari antrean hanya jika belum diganti siswa selama request berjalan
-        if (pendingRef.current[questionId] === optionId) {
-          delete pendingRef.current[questionId];
-          writeJson(storageKey(attemptId, "pending"), pendingRef.current);
+    const run = (async () => {
+      setSaveState((prev) => ({ ...prev, status: "saving" }));
+      clearTimeout(retryTimer.current);
+
+      for (const [questionId, optionId] of Object.entries(pendingRef.current)) {
+        try {
+          await quizApi.saveAnswer(attemptId, Number(questionId), optionId);
+          // Hapus dari antrean hanya jika belum diganti siswa selama request berjalan
+          if (pendingRef.current[questionId] === optionId) dropPending(questionId);
+        } catch (error) {
+          const status = error.response?.status;
+          if (status === 409) {
+            // Waktu habis / sudah dikumpulkan di server
+            if (error.response.data?.status === "time_up") toast.warning("Waktu habis. Ujian dikumpulkan otomatis.");
+            finish(error.response.data?.data?.attempt ?? null);
+            return false;
+          }
+          if (status === 422) {
+            // Jawaban tidak valid (mis. soal diubah guru): buang soal ini saja agar antrean tidak macet
+            dropPending(questionId);
+            toast.error(getErrorMessage(error, "Jawaban tidak dapat disimpan."));
+            continue;
+          }
+          setSaveState((prev) => ({ ...prev, status: error.response ? "error" : "offline" }));
+          retryTimer.current = setTimeout(() => flushRef.current(), retryDelay.current);
+          retryDelay.current = Math.min(retryDelay.current * 2, 30000);
+          return false;
         }
       }
+
       retryDelay.current = 2000;
       setSaveState({ status: "saved", savedAt: new Date() });
       return true;
-    } catch (error) {
-      const status = error.response?.status;
-      if (status === 409) {
-        // Waktu habis / sudah dikumpulkan di server
-        const attempt = error.response.data?.data?.attempt;
-        if (error.response.data?.status === "time_up") toast.warning("Waktu habis. Ujian dikumpulkan otomatis.");
-        finish(attempt ?? null);
-        return false;
-      }
-      const offline = !error.response;
-      setSaveState((prev) => ({ ...prev, status: offline ? "offline" : "error" }));
-      if (!offline && status === 422) {
-        // Jawaban tidak valid (mis. soal diubah guru): buang dari antrean agar tidak macet
-        entries.forEach(([questionId]) => delete pendingRef.current[questionId]);
-        writeJson(storageKey(attemptId, "pending"), pendingRef.current);
-        toast.error(getErrorMessage(error, "Jawaban tidak dapat disimpan."));
-        return false;
-      }
-      retryTimer.current = setTimeout(() => flush(), retryDelay.current);
-      retryDelay.current = Math.min(retryDelay.current * 2, 30000);
-      return false;
-    } finally {
-      flushingRef.current = false;
+    })().finally(() => {
+      flushingRef.current = null;
       // Jika ada jawaban baru masuk selama proses, kirim lagi
       if (!finishedRef.current && Object.keys(pendingRef.current).length && retryDelay.current === 2000) {
-        setTimeout(() => flush(), 0);
+        setTimeout(() => flushRef.current(), 0);
       }
-    }
+    });
+
+    flushingRef.current = run;
+    return run;
   }, [attemptId, finish]);
+
+  const flushRef = useRef(flush);
+  useEffect(() => {
+    flushRef.current = flush;
+  }, [flush]);
+
+  /** Tunggu sampai seluruh antrean terkirim, termasuk jawaban yang masuk saat pengiriman berjalan. */
+  const flushAll = useCallback(async () => {
+    let ok = await flush();
+    while (ok && !finishedRef.current && Object.keys(pendingRef.current).length) {
+      ok = await flush();
+    }
+    return ok;
+  }, [flush]);
 
   const selectAnswer = useCallback(
     (questionId, optionId) => {
@@ -136,35 +159,42 @@ export function useExamSession(session, { onFinished }) {
     [attemptId, flush]
   );
 
-  const toggleFlag = useCallback(
-    (questionId) => {
-      setFlags((prev) => {
-        const next = { ...prev, [questionId]: !prev[questionId] };
-        writeJson(storageKey(attemptId, "flags"), next);
-        return next;
-      });
-    },
-    [attemptId]
-  );
+  const submittingRef = useRef(false);
+  /** Waktu paling awal percobaan auto-submit berikutnya (jeda saat gagal). */
+  const nextAutoSubmitAt = useRef(0);
 
   const submit = useCallback(
     async ({ auto = false } = {}) => {
-      if (finishedRef.current || isSubmitting) return;
+      if (finishedRef.current || submittingRef.current) return;
+      submittingRef.current = true;
       setIsSubmitting(true);
-      await flush();
+
+      const fail = (message) => {
+        submittingRef.current = false;
+        setIsSubmitting(false);
+        toast.error(message);
+        if (auto) nextAutoSubmitAt.current = Date.now() + 5000;
+      };
+
+      // Pastikan semua jawaban sudah tersimpan di server sebelum dinilai.
+      // Saat waktu habis tetap dikumpulkan; server menilai jawaban yang sudah diterima.
+      const saved = await flushAll();
       if (finishedRef.current) return;
+      if (!saved && !auto) {
+        fail("Sebagian jawaban belum tersimpan. Periksa koneksi lalu kumpulkan lagi.");
+        return;
+      }
+
       try {
         const data = await quizApi.submit(attemptId);
         if (auto) toast.info("Waktu habis. Jawaban Anda dikumpulkan otomatis.");
         else toast.success("Ujian berhasil dikumpulkan.");
         finish(data.attempt);
       } catch (error) {
-        setIsSubmitting(false);
-        toast.error(getErrorMessage(error, "Gagal mengumpulkan ujian. Periksa koneksi lalu coba lagi."));
-        if (auto) setTimeout(() => submit({ auto: true }), 5000);
+        fail(getErrorMessage(error, "Gagal mengumpulkan ujian. Periksa koneksi lalu coba lagi."));
       }
     },
-    [attemptId, finish, flush, isSubmitting]
+    [attemptId, finish, flushAll]
   );
 
   // Kirim ulang jawaban tertunda dari sesi sebelumnya (mis. setelah refresh)
@@ -183,7 +213,9 @@ export function useExamSession(session, { onFinished }) {
 
   // Timer
   const submitRef = useRef(submit);
-  submitRef.current = submit;
+  useEffect(() => {
+    submitRef.current = submit;
+  }, [submit]);
   useEffect(() => {
     const tick = () => {
       const seconds = computeRemainingSeconds(deadline, clockOffset);
@@ -196,7 +228,9 @@ export function useExamSession(session, { onFinished }) {
         warned.current.one = true;
         toast.warning("Waktu tersisa 1 menit. Pastikan semua jawaban sudah dipilih.");
       }
-      if (seconds <= 0 && !finishedRef.current) submitRef.current({ auto: true });
+      if (seconds <= 0 && !finishedRef.current && Date.now() >= nextAutoSubmitAt.current) {
+        submitRef.current({ auto: true });
+      }
     };
     tick();
     const interval = setInterval(tick, 1000);
@@ -205,13 +239,10 @@ export function useExamSession(session, { onFinished }) {
 
   return {
     answers,
-    flags,
     remaining,
     saveState,
-    pendingCount: Object.keys(pendingRef.current).length,
     isSubmitting,
     selectAnswer,
-    toggleFlag,
     submit,
   };
 }

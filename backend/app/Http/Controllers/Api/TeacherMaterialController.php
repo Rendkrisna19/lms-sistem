@@ -281,7 +281,10 @@ class TeacherMaterialController extends Controller
 
         $query = LearningMaterial::where('classroom_id', $student->classroom_id)
             ->available()
-            ->with(['course:id,title', 'teacher:id,name']);
+            ->with(['course:id,title', 'teacher:id,name', 'classroom:id,name,code'])
+            // Riwayat akses siswa sendiri: dasar penanda "sudah dipelajari"
+            ->withCount(['accesses as my_access_count' => fn ($q) => $q->where('user_id', $student->id)])
+            ->withMax(['accesses as my_last_accessed_at' => fn ($q) => $q->where('user_id', $student->id)], 'accessed_at');
 
         if ($request->filled('content_type') && $request->content_type !== 'all') {
             $query->where('content_type', $request->content_type);

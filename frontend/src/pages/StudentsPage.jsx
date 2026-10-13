@@ -1,426 +1,290 @@
-import React, { useState, useEffect } from "react";
-import { Plus, Edit, Trash2, GraduationCap, Search, RefreshCw, School, Building2, FileSpreadsheet, FileText } from "lucide-react";
-import { Card } from "../components/ui/card";
-import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from "../components/ui/table";
+import { useMemo, useState } from "react";
+import { Edit, Eye, GraduationCap, Plus, RefreshCw, Trash2, Upload } from "lucide-react";
+import { toast } from "sonner";
 import { Avatar, AvatarFallback } from "../components/ui/avatar";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
-import { Input } from "../components/ui/input";
-import { Skeleton } from "../components/ui/skeleton";
-import { CustomSelect } from "../components/ui/custom-select";
-import { Pagination } from "../components/ui/pagination";
+import { SchoolScopeNotice, SchoolScopeSelect } from "../components/admin/SchoolScopeSelect";
+import { AdminDataPanel } from "../components/admin/data/AdminDataPanel";
+import { DataTable } from "../components/admin/data/DataTable";
+import { DataToolbar } from "../components/admin/data/DataToolbar";
+import { ExportButtons } from "../components/admin/data/ExportButtons";
+import { ImportDialog } from "../components/admin/data/ImportDialog";
 import { StudentModal } from "../components/modals/StudentModal";
+import { UserProfileDialog } from "../components/admin/profile/UserProfileDialog";
 import { ConfirmDeleteModal } from "../components/modals/ConfirmDeleteModal";
-import { api } from "../lib/api";
-import { toast } from "sonner";
+import { adminApi } from "../features/admin/adminApi";
+import { useAdminResource } from "../features/admin/useAdminResource";
+import { useAdminDelete } from "../features/admin/useAdminDelete";
+import { sortOptionsOf } from "../features/admin/tableView";
+import { useTableView } from "../hooks/useTableView";
+import { getErrorMessage } from "../lib/api";
 
-export function StudentsPage({ currentUser }) {
-  const isAdminMaster = currentUser?.role === "admin_master";
+const PAGE_SIZE = 10;
+const NO_CLASS = "none";
 
-  const [students, setStudents] = useState([]);
-  const [classrooms, setClassrooms] = useState([]);
-  const [schools, setSchools] = useState([]);
-  const [selectedSchool, setSelectedSchool] = useState("all");
-  const [filterClass, setFilterClass] = useState("all");
-  const [isLoading, setIsLoading] = useState(true);
-  const [search, setSearch] = useState("");
-  const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 5;
+const studentNis = (student) => student.nomor_induk ?? student.nim_nip ?? "";
+const classroomName = (student) => student.classroom?.name ?? "";
 
-  // Modal States
-  const [isFormModalOpen, setIsFormModalOpen] = useState(false);
+const SEARCH_FIELDS = [(s) => s.name, studentNis, (s) => s.email, classroomName, (s) => s.school?.name, (s) => s.city, (s) => s.parent_name];
+
+const SORT_COLUMNS = {
+  name: { accessor: (s) => s.name ?? "", asc: "Nama A–Z", desc: "Nama Z–A" },
+  nomor: { accessor: studentNis, asc: "NIS kecil ke besar", desc: "NIS besar ke kecil" },
+  email: { accessor: (s) => s.email ?? "", asc: "Email A–Z", desc: "Email Z–A" },
+  kelas: { accessor: classroomName, asc: "Kelas A–Z", desc: "Kelas Z–A" },
+};
+
+const CLASS_FILTER = {
+  id: "kelas",
+  match: (student, value) => (value === NO_CLASS ? !student.classroom_id : String(student.classroom_id) === value),
+};
+
+export function StudentsPage() {
+  const { rows, isLoading, reload, scope, canWrite, writeParams } = useAdminResource("students");
+  const del = useAdminDelete({ writeParams, onDeleted: reload });
+
+  const [isFormOpen, setIsFormOpen] = useState(false);
   const [studentToEdit, setStudentToEdit] = useState(null);
+  const [profileUser, setProfileUser] = useState(null);
+  const [isImportOpen, setIsImportOpen] = useState(false);
+  const [exportingFormat, setExportingFormat] = useState(null);
 
-  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
-  const [studentToDelete, setStudentToDelete] = useState(null);
-  const [isDeleting, setIsDeleting] = useState(false);
-
-  // Fetch schools list for filter
-  const fetchSchools = async () => {
-    try {
-      const res = await api.get("/admin/schools");
-      if (res.data?.status === "success") {
-        setSchools(res.data.data);
-      }
-    } catch (e) {
-      console.warn("Could not load schools:", e);
-    }
-  };
-
-  // Fetch real students & classrooms
-  const fetchStudents = async (schoolId = selectedSchool) => {
-    try {
-      setIsLoading(true);
-      const studentsUrl = isAdminMaster
-        ? (schoolId === "all" ? "/master/students" : `/master/students?school_id=${schoolId}`)
-        : "/admin/students";
-
-      const classroomsUrl = isAdminMaster
-        ? (schoolId === "all" ? "/master/classrooms" : `/master/classrooms?school_id=${schoolId}`)
-        : "/admin/classrooms";
-
-      try {
-        const resStudents = await api.get(studentsUrl);
-        if (resStudents.data?.data) {
-          setStudents(resStudents.data.data);
-        }
-      } catch (studentErr) {
-        toast.error("Gagal memuat data siswa.");
-      }
-
-      try {
-        const resClasses = await api.get(classroomsUrl);
-        if (resClasses.data?.data) {
-          setClassrooms(resClasses.data.data);
-        }
-      } catch (classErr) {
-        console.warn("Could not load classrooms for filter:", classErr);
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (isAdminMaster) {
-      fetchSchools();
-    }
-    fetchStudents("all");
-  }, [isAdminMaster]);
-
-  const handleSchoolFilterChange = (val) => {
-    setSelectedSchool(val);
-    setCurrentPage(1);
-    fetchStudents(val);
-  };
-
-  const handleOpenCreate = () => {
-    setStudentToEdit(null);
-    setIsFormModalOpen(true);
-  };
-
-  const handleOpenEdit = (student) => {
-    setStudentToEdit(student);
-    setIsFormModalOpen(true);
-  };
-
-  const handleOpenDelete = (student) => {
-    setStudentToDelete(student);
-    setIsDeleteModalOpen(true);
-  };
-
-  const handleConfirmDelete = async () => {
-    if (!studentToDelete) return;
-
-    setIsDeleting(true);
-    try {
-      const res = await api.delete(`/admin/students/${studentToDelete.id}`);
-      if (res.data?.status === "success") {
-        toast.success(`Data Siswa "${studentToDelete.name}" berhasil dihapus.`);
-        setIsDeleteModalOpen(false);
-        setStudentToDelete(null);
-        fetchStudents(selectedSchool);
-      }
-    } catch (err) {
-      const msg = err.response?.data?.message || "Gagal menghapus data siswa.";
-      toast.error(msg);
-    } finally {
-      setIsDeleting(false);
-    }
-  };
-
-  const filteredStudents = students.filter((s) => {
-    const q = search.toLowerCase();
-    const nameMatch = (s.name || "").toLowerCase().includes(q);
-    const nisMatch = (s.nomor_induk || s.nim_nip || "").toLowerCase().includes(q);
-    const emailMatch = (s.email || "").toLowerCase().includes(q);
-
-    const classMatch =
-      filterClass === "all" ||
-      (filterClass === "unassigned" ? !s.classroom_id : String(s.classroom_id) === String(filterClass));
-
-    return (nameMatch || nisMatch || emailMatch) && classMatch;
+  const view = useTableView({
+    rows,
+    searchFields: SEARCH_FIELDS,
+    filters: [CLASS_FILTER],
+    sortColumns: SORT_COLUMNS,
+    defaultSortKey: "name",
+    pageSize: PAGE_SIZE,
   });
+  const sortOptions = useMemo(() => sortOptionsOf(SORT_COLUMNS), []);
 
-  const totalPages = Math.ceil(filteredStudents.length / itemsPerPage) || 1;
-  const paginatedStudents = filteredStudents.slice(
-    (currentPage - 1) * itemsPerPage,
-    currentPage * itemsPerPage
-  );
+  /** Pilihan kelas dibaca dari data yang ada, agar tidak perlu daftar kelas terpisah. */
+  const classOptions = useMemo(() => {
+    const classes = new Map();
+    rows.forEach((s) => {
+      if (s.classroom_id) classes.set(String(s.classroom_id), s.classroom?.name ?? `Kelas ${s.classroom_id}`);
+    });
+    const sorted = [...classes.entries()].sort((a, b) => a[1].localeCompare(b[1], "id", { numeric: true }));
+    return [
+      { value: "all", label: "Semua kelas" },
+      { value: NO_CLASS, label: "Belum punya kelas" },
+      ...sorted.map(([value, label]) => ({ value, label })),
+    ];
+  }, [rows]);
 
-  const schoolOptions = [
-    { value: "all", label: "Semua Sekolah" },
-    ...schools.map((s) => ({
-      value: s.id,
-      label: s.name,
-    })),
+  const exportView = async (format) => {
+    setExportingFormat(format);
+    try {
+      await adminApi.exportFile("students", format, view.filteredRows.map((s) => s.id), writeParams);
+      toast.success(`Berkas ${format === "pdf" ? "PDF" : "Excel"} berhasil diunduh.`);
+    } catch (err) {
+      toast.error(getErrorMessage(err, "Ekspor gagal. Coba lagi."));
+    } finally {
+      setExportingFormat(null);
+    }
+  };
+
+  const openCreate = () => {
+    setStudentToEdit(null);
+    setIsFormOpen(true);
+  };
+
+  const openEdit = (student) => {
+    setStudentToEdit(student);
+    setIsFormOpen(true);
+  };
+
+  const columns = [
+    { key: "no", label: "No", className: "w-14", render: (_, index) => <span className="text-slate-400 tabular-nums">{index + 1}</span> },
+    {
+      key: "nomor",
+      label: "NIS",
+      sortKey: "nomor",
+      render: (s) => <span className="font-mono text-xs font-medium text-slate-600">{studentNis(s) || "–"}</span>,
+    },
+    {
+      key: "name",
+      label: "Nama siswa",
+      sortKey: "name",
+      render: (s) => (
+        <div className="flex items-center gap-2.5">
+          <Avatar className="h-8 w-8">
+            <AvatarFallback className="bg-brand-600 text-xs font-bold text-white">{s.name?.charAt(0) ?? "S"}</AvatarFallback>
+          </Avatar>
+          <button type="button" onClick={() => setProfileUser(s)} className="text-left font-semibold text-slate-900 hover:text-brand-700 hover:underline">
+            {s.name}
+          </button>
+        </div>
+      ),
+    },
+    ...(scope.isMaster
+      ? [{ key: "school", label: "Sekolah", render: (s) => <span className="text-xs text-slate-600">{s.school?.name ?? "–"}</span> }]
+      : []),
+    { key: "email", label: "Email", sortKey: "email", render: (s) => <span className="text-xs text-slate-600">{s.email}</span> },
+    {
+      key: "kelas",
+      label: "Kelas",
+      sortKey: "kelas",
+      render: (s) =>
+        s.classroom ? (
+          <Badge variant="outline" className="gap-1 border-brand-200 bg-brand-50 text-brand-700">
+            <GraduationCap className="h-3 w-3" aria-hidden="true" />
+            {s.classroom.name}
+          </Badge>
+        ) : (
+          <Badge variant="muted">Belum ada kelas</Badge>
+        ),
+    },
+    {
+      key: "kota",
+      label: "Kota",
+      render: (s) => <span className="text-xs text-slate-600">{s.city || "–"}</span>,
+    },
+    ...(canWrite
+      ? [
+          {
+            key: "aksi",
+            label: "Aksi",
+            align: "right",
+            render: (s) => (
+              <div className="flex items-center justify-end gap-1">
+                <Button variant="ghost" size="icon-sm" className="text-slate-500 hover:bg-brand-50 hover:text-brand-700" onClick={() => setProfileUser(s)} aria-label={`Detail ${s.name}`} title="Lihat detail">
+                  <Eye className="h-3.5 w-3.5" aria-hidden="true" />
+                </Button>
+                <Button variant="ghost" size="icon-sm" onClick={() => openEdit(s)} aria-label={`Ubah ${s.name}`} title="Ubah data">
+                  <Edit className="h-3.5 w-3.5" aria-hidden="true" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="text-red-600 hover:bg-red-50"
+                  onClick={() => del.requestDelete({ resource: "students", id: s.id, name: s.name, noun: "Data Siswa" })}
+                  aria-label={`Hapus ${s.name}`}
+                  title="Hapus data"
+                >
+                  <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                </Button>
+              </div>
+            ),
+          },
+        ]
+      : []),
   ];
 
+  const start = (view.page - 1) * PAGE_SIZE + 1;
+  const filtering = Boolean(view.query) || (view.filterValues.kelas ?? "all") !== "all";
+
   return (
-    <div className="space-y-6 w-full">
-      {/* Header Banner */}
-      <Card className="bg-white border-slate-200/80 rounded-3xl p-5 sm:p-6 shadow-xs space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-3 border-b border-slate-100">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="h-8 w-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
-                <GraduationCap className="h-4 w-4" />
-              </span>
-              <h3 className="text-lg font-bold text-slate-900">
-                Data Siswa
-              </h3>
-            </div>
-            <p className="text-xs text-slate-500 mt-1">
-              Daftar siswa yang terdaftar di sekolah.
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2.5">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => toast.info("Fitur Export Excel akan segera tersedia.")}
-              className="rounded-xl border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer text-xs h-9 gap-1.5"
-            >
-              <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
-              <span>Export Excel</span>
-            </Button>
-
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => toast.info("Fitur Export PDF akan segera tersedia.")}
-              className="rounded-xl border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer text-xs h-9 gap-1.5"
-            >
-              <FileText className="h-4 w-4 text-red-600" />
-              <span>Export PDF</span>
-            </Button>
-
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => fetchStudents(selectedSchool)}
-              disabled={isLoading}
-              className="rounded-xl border-slate-200 text-slate-700 hover:bg-slate-50 text-xs h-9 cursor-pointer"
-            >
-              <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${isLoading ? "animate-spin" : ""}`} />
+    <>
+      <AdminDataPanel
+        icon={GraduationCap}
+        title="Data siswa"
+        description="Siswa yang terdaftar di sekolah. Impor dari Excel untuk menambah banyak siswa sekaligus."
+        actions={
+          <>
+            <Button variant="ghost" size="sm" className="text-slate-700" onClick={reload} disabled={isLoading} aria-label="Segarkan">
+              <RefreshCw className={isLoading ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} aria-hidden="true" />
               Segarkan
             </Button>
-
-            {/* ONLY School Admin can create student, Admin Master does NOT create */}
-            {!isAdminMaster && (
-              <Button
-                size="sm"
-                onClick={handleOpenCreate}
-                className="rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs h-9 shadow-md shadow-blue-500/20 cursor-pointer"
-              >
-                <Plus className="h-3.5 w-3.5 mr-1.5" />
-                Tambah Siswa
+            {canWrite && (
+              <Button variant="ghost" size="sm" className="text-slate-700" onClick={() => setIsImportOpen(true)}>
+                <Upload className="h-3.5 w-3.5" aria-hidden="true" />
+                Impor Excel
               </Button>
             )}
-          </div>
-        </div>
+            <ExportButtons onExport={exportView} disabled={view.total === 0 || !canWrite} busyFormat={exportingFormat} />
+          </>
+        }
+        primaryAction={canWrite ? (
+          <Button size="sm" onClick={openCreate}>
+            <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+            Tambah siswa
+          </Button>
+        ) : null}
+        notice={<SchoolScopeNotice scope={scope} />}
+        toolbar={
+          <DataToolbar
+            query={view.query}
+            onQueryChange={view.setQuery}
+            placeholder="Cari nama, NIS, kelas, email…"
+            leading={scope.isMaster ? <SchoolScopeSelect scope={scope} className="w-full" /> : null}
+            filters={[
+              {
+                id: "kelas",
+                label: "Kelas",
+                value: view.filterValues.kelas ?? "all",
+                options: classOptions,
+                onChange: (value) => view.setFilter("kelas", value),
+              },
+            ]}
+            sortValue={view.sortValue}
+            sortOptions={sortOptions}
+            onSortChange={(value) => {
+              const [key, dir] = value.split(":");
+              view.setSort(key, dir);
+            }}
+            summary={`${view.total} dari ${rows.length} siswa`}
+          />
+        }
+        table={
+          <DataTable
+            columns={columns}
+            rows={view.pageRows}
+            rowKey={(s) => s.id}
+            sort={{ key: view.sortKey, dir: view.sortDir }}
+            onSort={view.toggleSort}
+            isLoading={isLoading}
+            startIndex={start}
+            emptyTitle={filtering ? "Tidak ada siswa yang cocok" : "Belum ada data siswa"}
+            emptyDescription={
+              filtering
+                ? "Coba ubah kata kunci atau filter kelas."
+                : canWrite
+                ? "Tambahkan siswa satu per satu, atau impor dari Excel."
+                : "Pilih sekolah untuk melihat datanya."
+            }
+          />
+        }
+        pagination={{
+          page: view.page,
+          totalPages: view.totalPages,
+          totalItems: view.total,
+          pageSize: PAGE_SIZE,
+          onPageChange: view.setPage,
+          itemName: "siswa",
+        }}
+      />
 
-        {/* Filter and Search Bar */}
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto flex-1 max-w-2xl">
-            {/* Search Input */}
-            <div className="relative w-full sm:w-56">
-              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-              <Input
-                type="text"
-                value={search}
-                onChange={(e) => {
-                  setSearch(e.target.value);
-                  setCurrentPage(1);
-                }}
-                placeholder="Cari siswa, NIS, email..."
-                className="pl-9 h-10 rounded-xl border-slate-200 text-xs sm:text-sm w-full"
-              />
-            </div>
+      <ImportDialog
+        open={isImportOpen}
+        onClose={() => setIsImportOpen(false)}
+        resource="students"
+        label="Siswa"
+        params={writeParams}
+        onImported={reload}
+      />
 
-            {/* School Filter Dropdown (Active for Admin Master) */}
-            {isAdminMaster && (
-              <div className="w-full sm:w-52">
-                <CustomSelect
-                  value={selectedSchool}
-                  onChange={handleSchoolFilterChange}
-                  options={schoolOptions}
-                  placeholder="Filter Sekolah"
-                  icon={Building2}
-                />
-              </div>
-            )}
+      <StudentModal isOpen={isFormOpen} onClose={() => setIsFormOpen(false)} onSuccess={reload} studentToEdit={studentToEdit} />
 
-            {/* Class Filter */}
-            <div className="w-full sm:w-48">
-              <CustomSelect
-                value={filterClass}
-                onChange={(val) => {
-                  setFilterClass(val);
-                  setCurrentPage(1);
-                }}
-                options={[
-                  { value: "all", label: "Semua Kelas" },
-                  { value: "unassigned", label: "Belum Punya Kelas" },
-                  ...classrooms.map((c) => ({
-                    value: c.id,
-                    label: `${c.name} (${c.code})`,
-                  })),
-                ]}
-                placeholder="Filter Kelas"
-                icon={School}
-              />
-            </div>
-          </div>
+      <UserProfileDialog
+        open={Boolean(profileUser)}
+        onClose={() => setProfileUser(null)}
+        user={profileUser}
+        role="murid"
+        canWrite={canWrite}
+        onEdit={openEdit}
+      />
 
-          <span className="text-xs text-slate-400 font-medium shrink-0">
-            Total: <strong className="text-slate-700">{filteredStudents.length} Siswa</strong>
-          </span>
-        </div>
-
-        {/* Table View */}
-        <div className="overflow-x-auto">
-          <Table className="w-full text-xs sm:text-sm">
-            <TableHeader className="border-b border-slate-100 text-[11px] font-bold uppercase text-slate-400">
-              <TableRow>
-                <TableHead className="py-3 px-4 w-12">NO</TableHead>
-                <TableHead className="py-3 px-4">NIS</TableHead>
-                <TableHead className="py-3 px-4">NAMA SISWA</TableHead>
-                {isAdminMaster && <TableHead className="py-3 px-4">SEKOLAH</TableHead>}
-                <TableHead className="py-3 px-4">KELAS</TableHead>
-                <TableHead className="py-3 px-4">EMAIL</TableHead>
-                <TableHead className="py-3 px-4 text-center">STATUS</TableHead>
-                {!isAdminMaster && <TableHead className="py-3 px-4 text-right">AKSI</TableHead>}
-              </TableRow>
-            </TableHeader>
-
-            <TableBody className="divide-y divide-slate-100">
-              {isLoading ? (
-                Array.from({ length: 3 }).map((_, i) => (
-                  <TableRow key={i}>
-                    <TableCell colSpan={isAdminMaster ? 7 : 7} className="py-4 px-4">
-                      <Skeleton className="h-6 w-full rounded-lg" />
-                    </TableCell>
-                  </TableRow>
-                ))
-              ) : filteredStudents.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={isAdminMaster ? 7 : 7} className="py-8 text-center text-slate-400 text-xs">
-                    {search ? "Tidak ada siswa yang cocok dengan pencarian." : "Belum ada data siswa terdaftar."}
-                  </TableCell>
-                </TableRow>
-              ) : (
-                paginatedStudents.map((s, idx) => (
-                  <TableRow key={s.id} className="hover:bg-slate-50/80 transition-colors">
-                    <TableCell className="py-3.5 px-4 font-bold text-slate-400">
-                      {((currentPage - 1) * itemsPerPage) + idx + 1}
-                    </TableCell>
-                    <TableCell className="py-3.5 px-4 font-mono font-medium text-slate-600 text-xs">
-                      {s.nomor_induk || s.nim_nip}
-                    </TableCell>
-                    <TableCell className="py-3.5 px-4">
-                      <div className="flex items-center gap-2.5">
-                        <Avatar className="h-8 w-8 ring-1 ring-blue-100">
-                          <AvatarFallback className="bg-blue-600 text-white font-bold text-xs">
-                            {s.name ? s.name.charAt(0) : "S"}
-                          </AvatarFallback>
-                        </Avatar>
-                        <span className="font-semibold text-slate-800">{s.name}</span>
-                      </div>
-                    </TableCell>
-
-                    {/* Sekolah Mitra (Visible for Admin Master) */}
-                    {isAdminMaster && (
-                      <TableCell className="py-3.5 px-4">
-                        <Badge variant="outline" className="text-[11px] font-semibold text-blue-700 bg-blue-50 border-blue-200">
-                          {s.school?.name || "SMA Mitra Inalum"}
-                        </Badge>
-                      </TableCell>
-                    )}
-
-                    <TableCell className="py-3.5 px-4">
-                      {s.classroom ? (
-                        <Badge variant="outline" className="text-[11px] font-semibold text-blue-700 bg-blue-50 border-blue-200">
-                          {s.classroom.name} ({s.classroom.code})
-                        </Badge>
-                      ) : (
-                        <span className="text-slate-400 italic text-xs">Belum diplot</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="py-3.5 px-4 text-slate-600 font-mono text-xs">
-                      {s.email}
-                    </TableCell>
-                    <TableCell className="py-3.5 px-4 text-center">
-                      <Badge className="bg-blue-50 text-blue-700 border-blue-200 text-[11px] font-semibold">
-                        Siswa Aktif
-                      </Badge>
-                    </TableCell>
-
-                    {/* Aksi hanya untuk Admin Sekolah */}
-                    {!isAdminMaster && (
-                      <TableCell className="py-3.5 px-4 text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleOpenEdit(s)}
-                            className="h-8 w-8 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg cursor-pointer"
-                            title="Edit Siswa"
-                          >
-                            <Edit className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleOpenDelete(s)}
-                            className="h-8 w-8 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg cursor-pointer"
-                            title="Hapus Siswa"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    )}
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </div>
-
-        <Pagination
-          currentPage={currentPage}
-          totalPages={totalPages}
-          totalItems={filteredStudents.length}
-          itemsPerPage={itemsPerPage}
-          onPageChange={setCurrentPage}
-          itemName="siswa"
-        />
-      </Card>
-
-      {/* Modal Tambah / Edit Siswa (School Admin) */}
-      {!isAdminMaster && (
-        <StudentModal
-          isOpen={isFormModalOpen}
-          onClose={() => setIsFormModalOpen(false)}
-          onSuccess={() => fetchStudents(selectedSchool)}
-          studentToEdit={studentToEdit}
-          classrooms={classrooms}
-        />
-      )}
-
-      {/* Modal Konfirmasi Hapus Siswa */}
-      {!isAdminMaster && (
-        <ConfirmDeleteModal
-          isOpen={isDeleteModalOpen}
-          onClose={() => setIsDeleteModalOpen(false)}
-          onConfirm={handleConfirmDelete}
-          isLoading={isDeleting}
-          title="Hapus Data Siswa?"
-          description={`Apakah Anda yakin ingin menghapus data siswa "${studentToDelete?.name}"? Tindakan ini tidak dapat dibatalkan.`}
-        />
-      )}
-    </div>
+      <ConfirmDeleteModal
+        isOpen={Boolean(del.target)}
+        onClose={del.cancelDelete}
+        onConfirm={del.confirmDelete}
+        isLoading={del.isDeleting}
+        title="Hapus data siswa?"
+        description={`Data siswa "${del.target?.name ?? ""}" akan dihapus. Tindakan ini tidak dapat dibatalkan.`}
+      />
+    </>
   );
 }

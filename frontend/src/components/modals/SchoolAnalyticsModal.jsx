@@ -1,32 +1,23 @@
-import React, { useState, useEffect } from "react";
-import { X, Building2, GraduationCap, Award, TrendingUp, Users, School, BarChart3, CheckCircle2 } from "lucide-react";
+import { useEffect } from "react";
+import { X, GraduationCap, Award, TrendingUp, School, BarChart3, CheckCircle2 } from "lucide-react";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import { Skeleton } from "../ui/skeleton";
-import { api } from "../../lib/api";
+import { useApiQuery } from "../../hooks/useApiQuery";
+import { percentLabel } from "../../features/admin/format";
 import { toast } from "sonner";
 
+/** Analitik murid & akademik satu sekolah (admin master). */
 export function SchoolAnalyticsModal({ isOpen, onClose, school }) {
-  const [data, setData] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const analytics = useApiQuery(isOpen && school?.id ? `/admin/schools/${school.id}/analytics` : null, {
+    select: (body) => body.data ?? null,
+  });
+  const data = analytics.data;
+  const isLoading = analytics.isLoading;
 
   useEffect(() => {
-    if (isOpen && school?.id) {
-      setIsLoading(true);
-      api.get(`/admin/schools/${school.id}/analytics`)
-        .then((res) => {
-          if (res.data?.status === "success") {
-            setData(res.data.data);
-          }
-        })
-        .catch((err) => {
-          toast.error("Gagal memuat analitik siswa untuk sekolah ini.");
-        })
-        .finally(() => {
-          setIsLoading(false);
-        });
-    }
-  }, [isOpen, school?.id]);
+    if (analytics.error) toast.error("Gagal memuat analitik siswa untuk sekolah ini.");
+  }, [analytics.error]);
 
   if (!isOpen || !school) return null;
 
@@ -45,7 +36,7 @@ export function SchoolAnalyticsModal({ isOpen, onClose, school }) {
                   Analitik Murid & Akademik
                 </h3>
                 <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 text-[10px] font-bold">
-                  {school.jenjang || "SMA"}
+                  {school.jenjang || "–"}
                 </Badge>
               </div>
               <p className="text-xs text-slate-500">
@@ -82,7 +73,7 @@ export function SchoolAnalyticsModal({ isOpen, onClose, school }) {
                     <GraduationCap className="h-4 w-4" />
                   </div>
                   <div className="text-2xl font-extrabold text-slate-900">
-                    {data.summary?.total_students || 0}
+                    {data.summary?.total_students ?? "–"}
                   </div>
                   <span className="text-[10px] text-blue-600 font-medium">Terdaftar aktif</span>
                 </div>
@@ -93,7 +84,7 @@ export function SchoolAnalyticsModal({ isOpen, onClose, school }) {
                     <Award className="h-4 w-4" />
                   </div>
                   <div className="text-2xl font-extrabold text-slate-900">
-                    {data.summary?.average_exam_score || 0}
+                    {data.summary?.average_exam_score ?? "–"}
                   </div>
                   <span className="text-[10px] text-blue-600 font-medium">Skala 100 poin</span>
                 </div>
@@ -104,7 +95,7 @@ export function SchoolAnalyticsModal({ isOpen, onClose, school }) {
                     <TrendingUp className="h-4 w-4" />
                   </div>
                   <div className="text-2xl font-extrabold text-slate-900">
-                    {data.summary?.pass_rate_percentage || 0}%
+                    {percentLabel(data.summary?.pass_rate_percentage)}
                   </div>
                   <span className="text-[10px] text-blue-600 font-medium">Ujian & Kuis</span>
                 </div>
@@ -115,9 +106,9 @@ export function SchoolAnalyticsModal({ isOpen, onClose, school }) {
                     <School className="h-4 w-4" />
                   </div>
                   <div className="text-2xl font-extrabold text-slate-900">
-                    {data.summary?.total_classrooms || 0}
+                    {data.summary?.total_classrooms ?? "–"}
                   </div>
-                  <span className="text-[10px] text-blue-600 font-medium">{data.summary?.total_teachers || 0} Guru pengampu</span>
+                  <span className="text-[10px] text-blue-600 font-medium">{data.summary?.total_teachers ?? "–"} Guru pengampu</span>
                 </div>
               </div>
 

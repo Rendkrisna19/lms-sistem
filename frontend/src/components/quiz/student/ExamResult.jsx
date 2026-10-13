@@ -1,63 +1,83 @@
 import { Link } from "react-router-dom";
-import { Award, Clock, Hourglass } from "lucide-react";
+import { CheckCircle2, Clock, Hourglass, XCircle } from "lucide-react";
 import { buttonVariants } from "../../ui/button";
-import { Badge } from "../../ui/badge";
 import { formatDateTime } from "../../../lib/datetime";
 import { cn } from "../../../lib/utils";
 
+/** Hasil ujian setelah dikumpulkan. Nilai hanya tampil bila guru mengizinkan. */
 export function ExamResult({ quizTitle, attempt }) {
-  const visible = attempt?.result_visible;
-  const passed = attempt?.is_passed;
+  const visible = Boolean(attempt?.result_visible);
+  const passed = Boolean(attempt?.is_passed);
+
+  const status = !visible
+    ? { label: "Menunggu penilaian", icon: Hourglass, tone: "text-slate-600" }
+    : passed
+    ? { label: "Lulus KKM", icon: CheckCircle2, tone: "text-emerald-700" }
+    : { label: "Belum mencapai KKM", icon: XCircle, tone: "text-amber-700" };
+  const Icon = status.icon;
 
   return (
-    <div className="mx-auto w-full max-w-md py-6">
-      <div className="rounded-3xl border border-slate-200/80 bg-white p-8 text-center shadow-sm space-y-5">
-        <div
-          className={cn(
-            "mx-auto h-16 w-16 rounded-3xl flex items-center justify-center text-white shadow-lg",
-            !visible ? "bg-brand-600 shadow-brand-600/25" : passed ? "bg-emerald-500 shadow-emerald-500/25" : "bg-amber-500 shadow-amber-500/25"
-          )}
-        >
-          {visible ? <Award className="h-8 w-8" aria-hidden="true" /> : <Hourglass className="h-8 w-8" aria-hidden="true" />}
-        </div>
-
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Ujian selesai</p>
-          <h1 className="mt-1 text-base font-bold text-slate-900">{quizTitle}</h1>
-        </div>
+    <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+      <article className="min-w-0 space-y-8 rounded-2xl border border-slate-200 bg-white p-6 sm:p-8">
+        <header className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Ujian selesai</p>
+          <h1 className="text-2xl font-bold leading-tight text-slate-900 sm:text-3xl">{quizTitle}</h1>
+        </header>
 
         {visible ? (
-          <div className="space-y-2">
-            <div className="text-5xl font-black text-slate-900 tabular-nums">{attempt.score}</div>
-            <Badge variant={passed ? "success" : "warning"} className="px-3 py-1 text-xs">
-              {passed ? "Lulus — memenuhi KKM" : `Remedial — KKM ${attempt.passing_score}`}
-            </Badge>
-            <p className="text-sm text-slate-500">
-              Benar {attempt.total_correct} dari {attempt.total_questions} soal.
-            </p>
+          <div className="grid gap-6 sm:grid-cols-[auto_1fr] sm:items-end">
+            <div>
+              <p className="text-sm text-slate-500">Nilai</p>
+              <p className="text-6xl font-bold tabular-nums text-slate-900">{attempt.score}</p>
+            </div>
+            <dl className="grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <dt className="text-slate-500">Jawaban benar</dt>
+                <dd className="font-semibold text-slate-900">
+                  {attempt.total_correct} dari {attempt.total_questions} soal
+                </dd>
+              </div>
+              <div>
+                <dt className="text-slate-500">KKM</dt>
+                <dd className="font-semibold text-slate-900">{attempt.passing_score}</dd>
+              </div>
+            </dl>
           </div>
         ) : (
-          <p className="text-sm text-slate-600 leading-relaxed">
-            Jawaban Anda sudah diterima. Nilai akan diumumkan oleh guru setelah ujian selesai dinilai.
+          <p className="max-w-xl text-sm leading-relaxed text-slate-600">
+            Jawaban Anda sudah diterima. Nilai akan diumumkan oleh guru setelah ujian dinilai.
           </p>
         )}
 
+        {visible && !passed && (
+          <p className="border-l-2 border-amber-400 pl-4 text-sm leading-relaxed text-slate-700">
+            Nilai belum mencapai KKM. Jika guru membuka kesempatan ujian ulang, ujian ini akan kembali muncul di daftar ujian Anda.
+          </p>
+        )}
+      </article>
+
+      <aside className="space-y-5 rounded-2xl border border-slate-200 bg-white p-6 xl:sticky xl:top-28">
+        <div className={cn("flex items-center gap-2 text-sm font-semibold", status.tone)}>
+          <Icon className="h-4 w-4" aria-hidden="true" />
+          {status.label}
+        </div>
+
         {attempt?.submitted_at && (
-          <p className="flex items-center justify-center gap-1.5 text-xs text-slate-400">
-            <Clock className="h-3.5 w-3.5" aria-hidden="true" />
+          <p className="flex items-start gap-2 text-xs text-slate-500">
+            <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
             {attempt.status === "timed_out" ? "Dikumpulkan otomatis" : "Dikumpulkan"} {formatDateTime(attempt.submitted_at)}
           </p>
         )}
 
-        <div className="grid gap-2 sm:grid-cols-2">
+        <div className="grid gap-2">
           <Link to="/ujian" className={buttonVariants({ variant: "outline" })}>
-            Daftar ujian
+            Kembali ke daftar ujian
           </Link>
-          <Link to="/nilai" className={buttonVariants()}>
+          <Link to="/nilai" className={buttonVariants({ variant: "ghost" })}>
             Lihat semua nilai
           </Link>
         </div>
-      </div>
+      </aside>
     </div>
   );
 }

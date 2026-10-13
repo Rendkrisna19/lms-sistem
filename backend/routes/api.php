@@ -5,12 +5,15 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\LessonController;
 use App\Http\Controllers\Api\MasterAdminController;
 use App\Http\Controllers\Api\SchoolAdminController;
+use App\Http\Controllers\Api\AdminUserSpreadsheetController;
 use App\Http\Controllers\Api\TeacherDashboardController;
 use App\Http\Controllers\Api\StudentDashboardController;
 use App\Http\Controllers\Api\StudentQuizController;
 use App\Http\Controllers\Api\SchoolController;
 use App\Http\Controllers\Api\TeacherMaterialController;
 use App\Http\Controllers\Api\TeacherQuizController;
+use App\Http\Controllers\Api\TeacherAssignmentController;
+use App\Http\Controllers\Api\StudentAssignmentController;
 
 Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:login');
 
@@ -43,6 +46,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/admin/schools/{id}', [SchoolController::class, 'update']);
         Route::delete('/admin/schools/{id}', [SchoolController::class, 'destroy']);
         Route::get('/admin/schools/{id}/analytics', [SchoolController::class, 'analytics']);
+        Route::post('/admin/schools/export', [SchoolController::class, 'export']);
     });
 
     // ==========================================
@@ -77,6 +81,14 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('/courses', [SchoolAdminController::class, 'createCourse']);
             Route::put('/courses/{id}', [SchoolAdminController::class, 'updateCourse']);
             Route::delete('/courses/{id}', [SchoolAdminController::class, 'deleteCourse']);
+
+            // Template, impor, dan ekspor Excel/PDF untuk data guru dan siswa
+            Route::get('/{resource}/template', [AdminUserSpreadsheetController::class, 'template'])
+                ->whereIn('resource', ['teachers', 'students']);
+            Route::post('/{resource}/import', [AdminUserSpreadsheetController::class, 'import'])
+                ->whereIn('resource', ['teachers', 'students']);
+            Route::post('/{resource}/export', [AdminUserSpreadsheetController::class, 'export'])
+                ->whereIn('resource', ['teachers', 'students']);
         };
 
         Route::prefix('school-admin')->group($schoolAdminRoutes);
@@ -112,6 +124,16 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/quizzes/{id}', [TeacherQuizController::class, 'destroy']);
         Route::get('/quizzes/{id}/grades', [TeacherQuizController::class, 'grades']);
         Route::get('/quizzes/{id}/export-csv', [TeacherQuizController::class, 'exportGrades']);
+        // Penugasan: POST /assignments/{id} dipakai untuk ubah (multipart, _method=PUT)
+        Route::get('/assignments', [TeacherAssignmentController::class, 'index']);
+        Route::post('/assignments', [TeacherAssignmentController::class, 'store']);
+        Route::get('/assignments/{id}', [TeacherAssignmentController::class, 'show']);
+        Route::match(['put', 'post'], '/assignments/{id}', [TeacherAssignmentController::class, 'update']);
+        Route::delete('/assignments/{id}', [TeacherAssignmentController::class, 'destroy']);
+        Route::put('/assignments/{id}/submissions/{submissionId}', [TeacherAssignmentController::class, 'grade']);
+
+        Route::post('/quizzes/{id}/students/{studentId}/retake', [TeacherQuizController::class, 'grantRetake']);
+        Route::delete('/quizzes/{id}/students/{studentId}/retake', [TeacherQuizController::class, 'revokeRetake']);
     });
 
     // ==========================================
@@ -131,6 +153,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/attempts/{id}/answers', [StudentQuizController::class, 'saveAnswer']);
         Route::post('/attempts/{id}/submit', [StudentQuizController::class, 'submit']);
         Route::get('/attempts/{id}', [StudentQuizController::class, 'result']);
+
+        // Penugasan: pengumpulan memakai POST multipart (teks dan/atau berkas)
+        Route::get('/assignments', [StudentAssignmentController::class, 'index']);
+        Route::get('/assignments/{id}', [StudentAssignmentController::class, 'show']);
+        Route::post('/assignments/{id}/submit', [StudentAssignmentController::class, 'submit']);
     });
 
     // ==========================================

@@ -1,47 +1,35 @@
-import React, { useState, useEffect } from "react";
-import {
-  Users,
-  GraduationCap,
-  School,
-  BookMarked,
-  Activity,
-  Plus,
-  RefreshCw,
-  Building2,
-  CheckCircle2
-} from "lucide-react";
+import { useEffect } from "react";
+import { Users, GraduationCap, School, BookMarked, RefreshCw } from "lucide-react";
+import { toast } from "sonner";
 import { Card } from "../ui/card";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import { AdminMasterDataSection } from "./AdminMasterDataSection";
 import { BarChartCard } from "./BarChartCard";
-import { WaveChartCard } from "./WaveChartCard";
-import { api } from "../../lib/api";
-import { toast } from "sonner";
+import { MediaPreferenceCard } from "./MediaPreferenceCard";
+import { useApiQuery } from "../../hooks/useApiQuery";
+import { useAdminResource } from "../../features/admin/useAdminResource";
+import { countLabel } from "../../features/admin/format";
 
+/** Dashboard admin sekolah: ringkasan sekolahnya sendiri (server membatasi data ke sekolah akun ini). */
 export function SchoolAdminDashboard({ currentUser, onNavigateTab }) {
-  const [data, setData] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
-
-  const fetchSchoolOverview = async () => {
-    try {
-      setIsLoading(true);
-      const res = await api.get("/school-admin/overview");
-      if (res.data?.status === "success") {
-        setData(res.data.data);
-      }
-    } catch (err) {
-      toast.error("Gagal memuat ringkasan sekolah.");
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const overview = useApiQuery("/school-admin/overview");
+  const analytics = useApiQuery("/admin/learning-analytics");
+  const classrooms = useAdminResource("classrooms");
 
   useEffect(() => {
-    fetchSchoolOverview();
-  }, []);
+    if (overview.error) toast.error("Gagal memuat ringkasan sekolah.");
+  }, [overview.error]);
 
-  const schoolName = currentUser?.school?.name || data?.school?.name || "SMA Mitra Inalum";
+  const data = overview.data;
+  const isLoading = overview.isLoading;
+  const schoolName = currentUser?.school?.name || data?.school?.name || "–";
+  const classBars = classrooms.rows.map((c) => ({
+    key: c.id,
+    label: c.code,
+    fullLabel: c.name,
+    value: c.students_count ?? 0,
+  }));
 
   return (
     <div className="space-y-6 w-full">
@@ -68,7 +56,7 @@ export function SchoolAdminDashboard({ currentUser, onNavigateTab }) {
             Plotting Rombel Kelas
           </Button>
           <Button
-            onClick={fetchSchoolOverview}
+            onClick={overview.reload}
             variant="outline"
             className="rounded-xl bg-white/10 hover:bg-white/20 text-white border-white/20 text-xs h-10 px-3 cursor-pointer"
             title="Muat Ulang Data"
@@ -85,20 +73,16 @@ export function SchoolAdminDashboard({ currentUser, onNavigateTab }) {
           className="bg-blue-600 text-white rounded-3xl p-5 shadow-lg shadow-blue-600/15 border-none flex flex-col justify-between cursor-pointer hover:shadow-xl hover:scale-[1.01] transition-all group"
         >
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-blue-100 uppercase tracking-wider">
-              Guru Pengampu
-            </span>
+            <span className="text-xs font-medium text-blue-100 uppercase tracking-wider">Guru Pengampu</span>
             <div className="h-8 w-8 rounded-xl bg-white/20 flex items-center justify-center text-white group-hover:bg-white group-hover:text-blue-600 transition-colors">
               <Users className="h-4 w-4" />
             </div>
           </div>
           <div className="mt-4">
             <h3 className="text-3xl font-extrabold text-white tracking-tight">
-              {isLoading ? "..." : `${data?.total_teachers || 0} Guru`}
+              {isLoading ? "..." : countLabel(data?.total_teachers, "Guru")}
             </h3>
-            <p className="text-xs text-blue-100 mt-1 font-medium">
-              Terdaftar di {schoolName} →
-            </p>
+            <p className="text-xs text-blue-100 mt-1 font-medium">Terdaftar di {schoolName} →</p>
           </div>
         </Card>
 
@@ -107,20 +91,16 @@ export function SchoolAdminDashboard({ currentUser, onNavigateTab }) {
           className="bg-white border-slate-200/80 rounded-3xl p-5 shadow-xs flex flex-col justify-between hover:shadow-md hover:border-blue-300 transition-all cursor-pointer group"
         >
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-              Siswa Terdaftar
-            </span>
+            <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">Siswa Terdaftar</span>
             <div className="h-8 w-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-colors">
               <GraduationCap className="h-4 w-4" />
             </div>
           </div>
           <div className="mt-4">
             <h3 className="text-3xl font-extrabold text-slate-900 tracking-tight">
-              {isLoading ? "..." : `${data?.total_students || 0} Siswa`}
+              {isLoading ? "..." : countLabel(data?.total_students, "Siswa")}
             </h3>
-            <p className="text-xs text-blue-600 mt-1 font-medium">
-              Peserta Didik Aktif →
-            </p>
+            <p className="text-xs text-blue-600 mt-1 font-medium">Peserta Didik Aktif →</p>
           </div>
         </Card>
 
@@ -129,20 +109,16 @@ export function SchoolAdminDashboard({ currentUser, onNavigateTab }) {
           className="bg-white border-slate-200/80 rounded-3xl p-5 shadow-xs flex flex-col justify-between hover:shadow-md hover:border-blue-300 transition-all cursor-pointer group"
         >
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-              Rombel Kelas
-            </span>
+            <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">Rombel Kelas</span>
             <div className="h-8 w-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-colors">
               <School className="h-4 w-4" />
             </div>
           </div>
           <div className="mt-4">
             <h3 className="text-3xl font-extrabold text-slate-900 tracking-tight">
-              {isLoading ? "..." : `${data?.total_classrooms || 0} Rombel`}
+              {isLoading ? "..." : countLabel(data?.total_classrooms, "Rombel")}
             </h3>
-            <p className="text-xs text-blue-600 mt-1 font-medium">
-              Kelola Kelas & Plotting →
-            </p>
+            <p className="text-xs text-blue-600 mt-1 font-medium">Kelola Kelas & Plotting →</p>
           </div>
         </Card>
 
@@ -151,20 +127,16 @@ export function SchoolAdminDashboard({ currentUser, onNavigateTab }) {
           className="bg-white border-slate-200/80 rounded-3xl p-5 shadow-xs flex flex-col justify-between hover:shadow-md hover:border-blue-300 transition-all cursor-pointer group"
         >
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-              Mata Pelajaran
-            </span>
+            <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">Mata Pelajaran</span>
             <div className="h-8 w-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-colors">
               <BookMarked className="h-4 w-4" />
             </div>
           </div>
           <div className="mt-4">
             <h3 className="text-3xl font-extrabold text-slate-900 tracking-tight">
-              {isLoading ? "..." : `${data?.total_courses || 0} Mapel`}
+              {isLoading ? "..." : countLabel(data?.total_courses, "Mapel")}
             </h3>
-            <p className="text-xs text-blue-600 mt-1 font-medium">
-              Kurikulum Berjalan →
-            </p>
+            <p className="text-xs text-blue-600 mt-1 font-medium">Kurikulum Berjalan →</p>
           </div>
         </Card>
       </div>
@@ -172,18 +144,20 @@ export function SchoolAdminDashboard({ currentUser, onNavigateTab }) {
       {/* Row 2: Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 w-full">
         <div className="lg:col-span-7">
-          <BarChartCard role="admin" />
+          <BarChartCard
+            title="Jumlah Siswa per Kelas"
+            items={classBars}
+            isLoading={classrooms.isLoading}
+            emptyText="Belum ada rombel kelas terdaftar."
+          />
         </div>
         <div className="lg:col-span-5">
-          <WaveChartCard role="admin" />
+          <MediaPreferenceCard summary={analytics.data?.summary} />
         </div>
       </div>
 
-      {/* Row 3: Admin Master Data Management (Guru & Siswa) */}
-      <AdminMasterDataSection
-        onDataUpdated={fetchSchoolOverview}
-        onNavigateTab={onNavigateTab}
-      />
+      {/* Row 3: Admin Master Data Management (Guru, Siswa, Mapel) */}
+      <AdminMasterDataSection onDataUpdated={overview.reload} onNavigateTab={onNavigateTab} />
     </div>
   );
 }

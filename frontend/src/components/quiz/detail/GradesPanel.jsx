@@ -6,6 +6,7 @@ import { Input } from "../../ui/input";
 import { EmptyState } from "../../ui/empty-state";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../ui/table";
 import { formatDateTime } from "../../../lib/datetime";
+import { RetakeControl } from "./RetakeControl";
 
 const STATUS = {
   submitted: { label: "Selesai", variant: "secondary" },
@@ -14,7 +15,8 @@ const STATUS = {
   not_started: { label: "Belum mengerjakan", variant: "muted" },
 };
 
-export function GradesPanel({ grades }) {
+/** Rekap nilai ujian per siswa, termasuk pembukaan akses ujian ulang untuk siswa remedial. */
+export function GradesPanel({ grades, busyStudentId, onGrantRetake, onRevokeRetake }) {
   const [search, setSearch] = useState("");
   const summary = grades.summary;
 
@@ -65,13 +67,14 @@ export function GradesPanel({ grades }) {
                 <TableHead className="text-center">Benar</TableHead>
                 <TableHead className="text-center">Nilai</TableHead>
                 <TableHead className="text-center">Keterangan</TableHead>
+                <TableHead className="text-center">Ujian ulang</TableHead>
                 <TableHead>Selesai</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {students.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7}>
+                  <TableCell colSpan={8}>
                     <EmptyState icon={Users} title={search ? "Siswa tidak ditemukan" : "Belum ada siswa di kelas ini"} />
                   </TableCell>
                 </TableRow>
@@ -100,6 +103,14 @@ export function GradesPanel({ grades }) {
                         ) : (
                           <Badge variant="destructive">Remedial</Badge>
                         )}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <RetakeControl
+                          row={row}
+                          busy={busyStudentId === row.student_id}
+                          onGrant={() => onGrantRetake?.(row)}
+                          onRevoke={() => onRevokeRetake?.(row)}
+                        />
                       </TableCell>
                       <TableCell className="text-xs text-slate-500 whitespace-nowrap">{row.submitted_at ? formatDateTime(row.submitted_at) : "–"}</TableCell>
                     </TableRow>

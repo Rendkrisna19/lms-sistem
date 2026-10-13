@@ -6,7 +6,10 @@ import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
 import { NativeSelect } from "../ui/native-select";
 import { Button } from "../ui/button";
-import { api, getErrorMessage, getValidationErrors } from "../../lib/api";
+import { SchoolScopeNotice } from "../admin/SchoolScopeSelect";
+import { adminApi } from "../../features/admin/adminApi";
+import { useAdminResource } from "../../features/admin/useAdminResource";
+import { getErrorMessage, getValidationErrors } from "../../lib/api";
 import { controlProps, useFormState } from "../../hooks/useFormState";
 
 /** Tahun ajaran berjalan, mis. "2026/2027" (Juli = awal tahun ajaran). */
@@ -16,21 +19,25 @@ function currentAcademicYear() {
   return `${start}/${start + 1}`;
 }
 
-export function ClassroomModal({ isOpen, onClose, onSuccess, classToEdit = null, teachers = [], scopeParams = {} }) {
+/** Tambah / edit kelas. Daftar wali kelas dan penyimpanan mengikuti cakupan sekolah (admin master). */
+export function ClassroomModal({ isOpen, onClose, onSuccess, classToEdit = null }) {
+  if (!isOpen) return null;
+
   return (
     <Dialog
-      open={isOpen}
+      open
       onClose={onClose}
       title={classToEdit ? "Edit Data Kelas" : "Tambah Kelas Baru"}
       description={classToEdit ? "Perbarui informasi kelas dan wali kelas." : "Daftarkan kelas baru untuk penempatan siswa dan mata pelajaran."}
     >
-      <ClassroomForm key={classToEdit?.id ?? "new"} classroom={classToEdit} teachers={teachers} onClose={onClose} onSuccess={onSuccess} scopeParams={scopeParams} />
+      <ClassroomForm classroom={classToEdit} onClose={onClose} onSuccess={onSuccess} />
     </Dialog>
   );
 }
 
-function ClassroomForm({ classroom, teachers, onClose, onSuccess, scopeParams }) {
+function ClassroomForm({ classroom, onClose, onSuccess }) {
   const isEditing = Boolean(classroom);
+  const { rows: teachers, scope } = useAdminResource("teachers");
   const { values, bind, errors, setErrors } = useFormState({
     name: classroom?.name ?? "",
     code: classroom?.code ?? "",
@@ -42,6 +49,7 @@ function ClassroomForm({ classroom, teachers, onClose, onSuccess, scopeParams })
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!scope.canWrite) return;
     const clientErrors = {};
     if (!values.name.trim()) clientErrors.name = "Nama kelas wajib diisi.";
     if (!values.code.trim()) clientErrors.code = "Kode kelas wajib diisi.";
@@ -51,7 +59,6 @@ function ClassroomForm({ classroom, teachers, onClose, onSuccess, scopeParams })
     }
 
     const payload = {
-      ...scopeParams,
       name: values.name.trim(),
       code: values.code.trim().toUpperCase(),
       homeroom_teacher_id: values.homeroom_teacher_id ? Number(values.homeroom_teacher_id) : null,
@@ -62,10 +69,10 @@ function ClassroomForm({ classroom, teachers, onClose, onSuccess, scopeParams })
     setIsSubmitting(true);
     try {
       if (isEditing) {
-        await api.put(`/admin/classrooms/${classroom.id}`, payload);
+        await adminApi.update("classrooms", classroom.id, payload, scope.params);
         toast.success(`Kelas "${payload.name}" berhasil diperbarui.`);
       } else {
-        await api.post("/admin/classrooms", payload);
+        await adminApi.create("classrooms", payload, scope.params);
         toast.success(`Kelas "${payload.name}" berhasil dibuat.`);
       }
       onSuccess?.();
@@ -80,6 +87,8 @@ function ClassroomForm({ classroom, teachers, onClose, onSuccess, scopeParams })
 
   return (
     <form onSubmit={handleSubmit} noValidate className="space-y-4">
+      <SchoolScopeNotice scope={scope} />
+
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Field label="Nama kelas" htmlFor="classroom-name" required error={errors.name} className="sm:col-span-2">
           <Input {...controlProps("classroom-name", errors.name)} {...bind("name")} placeholder="Contoh: X IPA 1" autoComplete="off" />
@@ -113,7 +122,7 @@ function ClassroomForm({ classroom, teachers, onClose, onSuccess, scopeParams })
         <Button type="button" variant="outline" onClick={onClose} disabled={isSubmitting}>
           Batal
         </Button>
-        <Button type="submit" isLoading={isSubmitting}>
+        <Button type="submit" isLoading={isSubmitting} disabled={!scope.canWrite}>
           {isEditing ? "Simpan Perubahan" : "Buat Kelas"}
         </Button>
       </div>

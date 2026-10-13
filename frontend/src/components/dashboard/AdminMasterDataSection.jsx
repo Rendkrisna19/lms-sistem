@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { Plus, Edit, Trash2, Users, GraduationCap, BookMarked, Search, RefreshCw, ShieldCheck, Mail, BookOpen } from "lucide-react";
+import { useState } from "react";
+import { Plus, Edit, Trash2, Users, GraduationCap, BookMarked, Search, RefreshCw, BookOpen } from "lucide-react";
 import { Card } from "../ui/card";
 import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from "../ui/table";
 import { Avatar, AvatarFallback } from "../ui/avatar";
@@ -7,154 +7,195 @@ import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Skeleton } from "../ui/skeleton";
+import { SchoolScopeNotice } from "../admin/SchoolScopeSelect";
 import { TeacherModal } from "../modals/TeacherModal";
 import { StudentModal } from "../modals/StudentModal";
 import { CourseModal } from "../modals/CourseModal";
 import { ConfirmDeleteModal } from "../modals/ConfirmDeleteModal";
-import { api } from "../../lib/api";
-import { toast } from "sonner";
+import { useAdminResource } from "../../features/admin/useAdminResource";
+import { useAdminDelete } from "../../features/admin/useAdminDelete";
 
+const TABS = {
+  guru: { placeholder: "Cari Guru berdasarkan Nama, NIP, atau Email...", deleteTitle: "Hapus Data Guru", noun: "Data Guru" },
+  siswa: { placeholder: "Cari Siswa berdasarkan Nama, NIS, atau Email...", deleteTitle: "Hapus Data Siswa", noun: "Data Siswa" },
+  mapel: { placeholder: "Cari Mata Pelajaran atau Guru Pengampu...", deleteTitle: "Hapus Mata Pelajaran", noun: "Mata Pelajaran" },
+};
+
+const DELETE_DESCRIPTIONS = {
+  guru: "Apakah Anda yakin ingin menghapus akun guru ini dari sistem database? Seluruh hak akses guru akan dinonaktifkan.",
+  siswa: "Apakah Anda yakin ingin menghapus akun siswa ini dari sistem database? Data ujian dan evaluasi siswa ini juga akan terhapus.",
+  mapel: "Apakah Anda yakin ingin menghapus mata pelajaran ini dari kurikulum? Seluruh bahan ajar yang terhubung akan dinonaktifkan.",
+};
+
+const TAB_BUTTON_BASE = "px-3.5 py-1.5 rounded-full font-semibold transition-all cursor-pointer";
+const TAB_BUTTON_ACTIVE = "bg-white text-blue-700 shadow-xs font-bold";
+const TAB_BUTTON_IDLE = "text-slate-500 hover:text-slate-800";
+
+/** Manajemen guru, siswa, dan mata pelajaran untuk admin sekolah (dan admin master bila sekolah dipilih). */
 export function AdminMasterDataSection({ onDataUpdated, onNavigateTab }) {
-  const [activeSubTab, setActiveSubTab] = useState("guru"); // 'guru' | 'siswa' | 'mapel'
-  const [teachers, setTeachers] = useState([]);
-  const [students, setStudents] = useState([]);
-  const [courses, setCourses] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [activeSubTab, setActiveSubTab] = useState("guru");
   const [search, setSearch] = useState("");
+  const [formState, setFormState] = useState(null); // { type: "guru" | "siswa" | "mapel", item }
 
-  // Modals state for Teachers
-  const [isTeacherModalOpen, setIsTeacherModalOpen] = useState(false);
-  const [teacherToEdit, setTeacherToEdit] = useState(null);
+  const teachers = useAdminResource("teachers");
+  const students = useAdminResource("students");
+  const courses = useAdminResource("courses");
+  const { canWrite, writeParams } = teachers;
+  const isLoading = teachers.isLoading || students.isLoading || courses.isLoading;
 
-  // Modals state for Students
-  const [isStudentModalOpen, setIsStudentModalOpen] = useState(false);
-  const [studentToEdit, setStudentToEdit] = useState(null);
+  const reloadAll = () => {
+    teachers.reload();
+    students.reload();
+    courses.reload();
+    onDataUpdated?.();
+  };
 
-  // Modals state for Courses (Mata Pelajaran)
-  const [isCourseModalOpen, setIsCourseModalOpen] = useState(false);
-  const [courseToEdit, setCourseToEdit] = useState(null);
+  const del = useAdminDelete({ writeParams, onDeleted: reloadAll });
 
-  // Delete Alert Modal state
-  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
-  const [itemToDelete, setItemToDelete] = useState(null); // { type: 'guru'|'siswa'|'mapel', data: {...} }
-  const [isDeleting, setIsDeleting] = useState(false);
+  const requestDelete = (type, item) => {
+    const { noun } = TABS[type];
+    const resource = { guru: "teachers", siswa: "students", mapel: "courses" }[type];
+    del.requestDelete({
+      kind: type,
+      resource,
+      id: item.id,
+      name: type === "mapel" ? item.title : item.name,
+      number: item.nomor_induk || item.nim_nip,
+      noun,
+    });
+  };
 
-  // Fetch real data from Laravel MySQL
-  const fetchAllData = async () => {
-    try {
-      setIsLoading(true);
-      const [teachersRes, studentsRes, coursesRes] = await Promise.all([
-        api.get("/admin/teachers"),
-        api.get("/admin/students"),
-        api.get("/admin/courses"),
-      ]);
+  const isFormOpen = (type) => formState?.type === type;
+  const formItem = formState?.item ?? null;
+  const closeForm = () => setFormState(null);
 
-      if (teachersRes.data?.data) setTeachers(teachersRes.data.data);
-      if (studentsRes.data?.data) setStudents(studentsRes.data.data);
-      if (coursesRes.data?.data) setCourses(coursesRes.data.data);
-      if (onDataUpdated) onDataUpdated();
-    } catch (err) {
-      toast.error("Gagal memuat data master dari server backend.");
-    } finally {
-      setIsLoading(false);
+  const q = search.toLowerCase();
+  const matches = (...values) => values.some((value) => (value || "").toLowerCase().includes(q));
+  const filteredTeachers = teachers.rows.filter((t) => matches(t.name, t.nomor_induk || t.nim_nip, t.email));
+  const filteredStudents = students.rows.filter((s) => matches(s.name, s.nomor_induk || s.nim_nip, s.email));
+  const filteredCourses = courses.rows.filter((c) => matches(c.title, c.instructor?.name, c.description));
+
+  const switchTab = (tab) => {
+    setActiveSubTab(tab);
+    setSearch("");
+  };
+
+  const tabButtonClass = (tab) => `${TAB_BUTTON_BASE} ${activeSubTab === tab ? TAB_BUTTON_ACTIVE : TAB_BUTTON_IDLE}`;
+  const columnCount = canWrite ? 6 : 5;
+  const createLabel = { guru: "Tambah Guru", siswa: "Tambah Siswa", mapel: "Tambah Mapel" }[activeSubTab];
+
+  const renderRows = () => {
+    if (isLoading) {
+      return Array.from({ length: 3 }).map((_, i) => (
+        <TableRow key={i}>
+          <TableCell colSpan={columnCount} className="py-4 px-4">
+            <Skeleton className="h-6 w-full rounded-lg" />
+          </TableCell>
+        </TableRow>
+      ));
     }
-  };
 
-  useEffect(() => {
-    fetchAllData();
-  }, []);
+    const emptyRow = (text) => (
+      <TableRow>
+        <TableCell colSpan={columnCount} className="py-8 text-center text-slate-400 text-xs">
+          {text}
+        </TableCell>
+      </TableRow>
+    );
 
-  // Handlers for Teacher
-  const handleOpenCreateTeacher = () => {
-    setTeacherToEdit(null);
-    setIsTeacherModalOpen(true);
-  };
+    const actions = (type, item, editTitle, deleteTitle) =>
+      canWrite && (
+        <TableCell className="py-3.5 px-4 text-right">
+          <div className="flex items-center justify-end gap-1.5">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setFormState({ type, item })}
+              className="h-8 w-8 p-0 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg cursor-pointer"
+              title={editTitle}
+            >
+              <Edit className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => requestDelete(type, item)}
+              className="h-8 w-8 p-0 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg cursor-pointer"
+              title={deleteTitle}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        </TableCell>
+      );
 
-  const handleOpenEditTeacher = (t) => {
-    setTeacherToEdit(t);
-    setIsTeacherModalOpen(true);
-  };
-
-  // Handlers for Student
-  const handleOpenCreateStudent = () => {
-    setStudentToEdit(null);
-    setIsStudentModalOpen(true);
-  };
-
-  const handleOpenEditStudent = (s) => {
-    setStudentToEdit(s);
-    setIsStudentModalOpen(true);
-  };
-
-  // Handlers for Mata Pelajaran
-  const handleOpenCreateCourse = () => {
-    setCourseToEdit(null);
-    setIsCourseModalOpen(true);
-  };
-
-  const handleOpenEditCourse = (c) => {
-    setCourseToEdit(c);
-    setIsCourseModalOpen(true);
-  };
-
-  // Handlers for Delete Confirmation
-  const handleOpenDelete = (type, data) => {
-    setItemToDelete({ type, data });
-    setIsDeleteModalOpen(true);
-  };
-
-  const handleConfirmDelete = async () => {
-    if (!itemToDelete) return;
-
-    setIsDeleting(true);
-    try {
-      if (itemToDelete.type === "guru") {
-        await api.delete(`/admin/teachers/${itemToDelete.data.id}`);
-        toast.success(`Data Guru "${itemToDelete.data.name}" berhasil dihapus.`);
-      } else if (itemToDelete.type === "siswa") {
-        await api.delete(`/admin/students/${itemToDelete.data.id}`);
-        toast.success(`Data Siswa "${itemToDelete.data.name}" berhasil dihapus.`);
-      } else {
-        await api.delete(`/admin/courses/${itemToDelete.data.id}`);
-        toast.success(`Mata Pelajaran "${itemToDelete.data.title}" berhasil dihapus.`);
-      }
-      setIsDeleteModalOpen(false);
-      setItemToDelete(null);
-      fetchAllData();
-    } catch (err) {
-      toast.error(err.response?.data?.message || "Gagal menghapus data.");
-    } finally {
-      setIsDeleting(false);
+    if (activeSubTab === "guru") {
+      if (filteredTeachers.length === 0) return emptyRow(search ? "Tidak ada guru yang cocok dengan pencarian." : "Belum ada guru terdaftar.");
+      return filteredTeachers.map((t, idx) => (
+        <TableRow key={t.id} className="hover:bg-slate-50/80 transition-colors">
+          <TableCell className="py-3.5 px-4 font-bold text-slate-400">{idx + 1}</TableCell>
+          <TableCell className="py-3.5 px-4 font-mono font-medium text-slate-600 text-xs">{t.nomor_induk || t.nim_nip}</TableCell>
+          <TableCell className="py-3.5 px-4">
+            <div className="flex items-center gap-2.5">
+              <Avatar className="h-8 w-8">
+                <AvatarFallback className="bg-brand-50 text-brand-700 font-bold text-xs">{t.name ? t.name.charAt(0) : "G"}</AvatarFallback>
+              </Avatar>
+              <span className="font-bold text-slate-900">{t.name}</span>
+            </div>
+          </TableCell>
+          <TableCell className="py-3.5 px-4 text-slate-500 text-xs">{t.email}</TableCell>
+          <TableCell className="py-3.5 px-4 text-center">
+            <Badge className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold px-2.5 py-0.5">Aktif</Badge>
+          </TableCell>
+          {actions("guru", t, "Edit Guru", "Hapus Guru")}
+        </TableRow>
+      ));
     }
+
+    if (activeSubTab === "siswa") {
+      if (filteredStudents.length === 0) return emptyRow(search ? "Tidak ada siswa yang cocok dengan pencarian." : "Belum ada siswa terdaftar.");
+      return filteredStudents.map((s, idx) => (
+        <TableRow key={s.id} className="hover:bg-slate-50/80 transition-colors">
+          <TableCell className="py-3.5 px-4 font-bold text-slate-400">{idx + 1}</TableCell>
+          <TableCell className="py-3.5 px-4 font-mono font-medium text-slate-600 text-xs">{s.nomor_induk || s.nim_nip}</TableCell>
+          <TableCell className="py-3.5 px-4">
+            <div className="flex items-center gap-2.5">
+              <Avatar className="h-8 w-8">
+                <AvatarFallback className="bg-blue-50 text-blue-700 font-bold text-xs">{s.name ? s.name.charAt(0) : "S"}</AvatarFallback>
+              </Avatar>
+              <span className="font-bold text-slate-900">{s.name}</span>
+            </div>
+          </TableCell>
+          <TableCell className="py-3.5 px-4 text-slate-500 text-xs">{s.email}</TableCell>
+          <TableCell className="py-3.5 px-4 text-center">
+            <Badge className="bg-blue-50 text-blue-700 border border-blue-200 text-[11px] font-bold px-2.5 py-0.5">Aktif</Badge>
+          </TableCell>
+          {actions("siswa", s, "Edit Siswa", "Hapus Siswa")}
+        </TableRow>
+      ));
+    }
+
+    if (filteredCourses.length === 0) return emptyRow(search ? "Tidak ada mata pelajaran yang cocok dengan pencarian." : "Belum ada mata pelajaran terdaftar.");
+    return filteredCourses.map((c, idx) => (
+      <TableRow key={c.id} className="hover:bg-slate-50/80 transition-colors">
+        <TableCell className="py-3.5 px-4 font-bold text-slate-400">{idx + 1}</TableCell>
+        <TableCell className="py-3.5 px-4">
+          <div className="flex items-center gap-2">
+            <span className="h-7 w-7 rounded-lg bg-blue-50 text-blue-700 flex items-center justify-center font-bold text-xs shrink-0">
+              <BookOpen className="h-3.5 w-3.5" />
+            </span>
+            <span className="font-bold text-slate-900">{c.title}</span>
+          </div>
+        </TableCell>
+        <TableCell className="py-3.5 px-4 font-medium text-slate-700">{c.instructor?.name || "Belum ada pengampu"}</TableCell>
+        <TableCell className="py-3.5 px-4 text-slate-500 text-xs max-w-xs truncate">{c.description || "Belum ada deskripsi."}</TableCell>
+        <TableCell className="py-3.5 px-4 text-center">
+          <Badge className="bg-blue-50 text-blue-700 border border-blue-200 text-[11px] font-bold px-2.5 py-0.5">Aktif</Badge>
+        </TableCell>
+        {actions("mapel", c, "Edit Mapel", "Hapus Mapel")}
+      </TableRow>
+    ));
   };
-
-  // Filtered lists
-  const filteredTeachers = teachers.filter((t) => {
-    const q = search.toLowerCase();
-    return (
-      (t.name || "").toLowerCase().includes(q) ||
-      (t.nomor_induk || t.nim_nip || "").toLowerCase().includes(q) ||
-      (t.email || "").toLowerCase().includes(q)
-    );
-  });
-
-  const filteredStudents = students.filter((s) => {
-    const q = search.toLowerCase();
-    return (
-      (s.name || "").toLowerCase().includes(q) ||
-      (s.nomor_induk || s.nim_nip || "").toLowerCase().includes(q) ||
-      (s.email || "").toLowerCase().includes(q)
-    );
-  });
-
-  const filteredCourses = courses.filter((c) => {
-    const q = search.toLowerCase();
-    return (
-      (c.title || "").toLowerCase().includes(q) ||
-      (c.instructor?.name || "").toLowerCase().includes(q) ||
-      (c.description || "").toLowerCase().includes(q)
-    );
-  });
 
   return (
     <Card className="bg-white border-slate-200/80 rounded-3xl p-5 sm:p-6 shadow-xs space-y-5 w-full">
@@ -171,9 +212,7 @@ export function AdminMasterDataSection({ onDataUpdated, onNavigateTab }) {
             )}
           </div>
           <div>
-            <h3 className="text-base font-bold text-slate-900">
-              Manajemen Data Master Akademik
-            </h3>
+            <h3 className="text-base font-bold text-slate-900">Manajemen Data Master Akademik</h3>
             <p className="text-xs text-slate-400 mt-0.5">
               Kelola data guru pengampu, siswa belajar, dan mata pelajaran kurikulum secara realtime
             </p>
@@ -183,49 +222,20 @@ export function AdminMasterDataSection({ onDataUpdated, onNavigateTab }) {
         {/* Tab Pills & Add Action Button */}
         <div className="flex items-center gap-2.5 flex-wrap">
           <div className="flex items-center bg-slate-100 p-1 rounded-full text-xs">
-            <button
-              onClick={() => {
-                setActiveSubTab("guru");
-                setSearch("");
-              }}
-              className={`px-3.5 py-1.5 rounded-full font-semibold transition-all cursor-pointer ${
-                activeSubTab === "guru"
-                  ? "bg-white text-blue-700 shadow-xs font-bold"
-                  : "text-slate-500 hover:text-slate-800"
-              }`}
-            >
-              Data Guru ({teachers.length})
+            <button type="button" onClick={() => switchTab("guru")} className={tabButtonClass("guru")}>
+              Data Guru ({teachers.rows.length})
             </button>
-            <button
-              onClick={() => {
-                setActiveSubTab("siswa");
-                setSearch("");
-              }}
-              className={`px-3.5 py-1.5 rounded-full font-semibold transition-all cursor-pointer ${
-                activeSubTab === "siswa"
-                  ? "bg-white text-blue-700 shadow-xs font-bold"
-                  : "text-slate-500 hover:text-slate-800"
-              }`}
-            >
-              Data Siswa ({students.length})
+            <button type="button" onClick={() => switchTab("siswa")} className={tabButtonClass("siswa")}>
+              Data Siswa ({students.rows.length})
             </button>
-            <button
-              onClick={() => {
-                setActiveSubTab("mapel");
-                setSearch("");
-              }}
-              className={`px-3.5 py-1.5 rounded-full font-semibold transition-all cursor-pointer ${
-                activeSubTab === "mapel"
-                  ? "bg-white text-blue-700 shadow-xs font-bold"
-                  : "text-slate-500 hover:text-slate-800"
-              }`}
-            >
-              Mata Pelajaran ({courses.length})
+            <button type="button" onClick={() => switchTab("mapel")} className={tabButtonClass("mapel")}>
+              Mata Pelajaran ({courses.rows.length})
             </button>
             {onNavigateTab && (
               <button
+                type="button"
                 onClick={() => onNavigateTab("kelas")}
-                className="px-3.5 py-1.5 rounded-full font-semibold transition-all cursor-pointer text-slate-600 hover:text-blue-700 hover:bg-white/90"
+                className={`${TAB_BUTTON_BASE} text-slate-600 hover:text-blue-700 hover:bg-white/90`}
                 title="Buka Halaman Manajemen Kelas & Plotting Guru"
               >
                 Kelas & Plotting →
@@ -233,46 +243,26 @@ export function AdminMasterDataSection({ onDataUpdated, onNavigateTab }) {
             )}
           </div>
 
-          {activeSubTab === "guru" ? (
+          {canWrite && (
             <Button
-              onClick={handleOpenCreateTeacher}
+              onClick={() => setFormState({ type: activeSubTab, item: null })}
               className="rounded-full bg-blue-600 hover:bg-blue-700 text-white text-xs px-4 py-2 h-8 shadow-xs cursor-pointer gap-1.5"
             >
               <Plus className="h-3.5 w-3.5" />
-              Tambah Guru
-            </Button>
-          ) : activeSubTab === "siswa" ? (
-            <Button
-              onClick={handleOpenCreateStudent}
-              className="rounded-full bg-blue-600 hover:bg-blue-700 text-white text-xs px-4 py-2 h-8 shadow-xs cursor-pointer gap-1.5"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              Tambah Siswa
-            </Button>
-          ) : (
-            <Button
-              onClick={handleOpenCreateCourse}
-              className="rounded-full bg-blue-600 hover:bg-blue-700 text-white text-xs px-4 py-2 h-8 shadow-xs cursor-pointer gap-1.5"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              Tambah Mapel
+              {createLabel}
             </Button>
           )}
         </div>
       </div>
+
+      <SchoolScopeNotice scope={teachers.scope} />
 
       {/* Search Input Bar */}
       <div className="flex items-center justify-between gap-3">
         <div className="relative max-w-sm w-full">
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
           <Input
-            placeholder={
-              activeSubTab === "guru"
-                ? "Cari Guru berdasarkan Nama, NIP, atau Email..."
-                : activeSubTab === "siswa"
-                ? "Cari Siswa berdasarkan Nama, NIS, atau Email..."
-                : "Cari Mata Pelajaran atau Guru Pengampu..."
-            }
+            placeholder={TABS[activeSubTab].placeholder}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="pl-10 text-xs rounded-xl border-slate-200"
@@ -282,7 +272,7 @@ export function AdminMasterDataSection({ onDataUpdated, onNavigateTab }) {
         <Button
           variant="outline"
           size="sm"
-          onClick={fetchAllData}
+          onClick={reloadAll}
           disabled={isLoading}
           className="rounded-full text-xs h-8 px-3 gap-1.5 cursor-pointer text-slate-500"
           title="Segarkan Data"
@@ -309,244 +299,47 @@ export function AdminMasterDataSection({ onDataUpdated, onNavigateTab }) {
               {activeSubTab === "mapel" && <TableHead className="py-3 px-4">DESKRIPSI MAPEL</TableHead>}
 
               <TableHead className="py-3 px-4 text-center">STATUS</TableHead>
-              <TableHead className="py-3 px-4 text-right">AKSI</TableHead>
+              {canWrite && <TableHead className="py-3 px-4 text-right">AKSI</TableHead>}
             </TableRow>
           </TableHeader>
 
-          <TableBody className="divide-y divide-slate-100">
-            {isLoading ? (
-              Array.from({ length: 3 }).map((_, i) => (
-                <TableRow key={i}>
-                  <TableCell colSpan={6} className="py-4 px-4">
-                    <Skeleton className="h-6 w-full rounded-lg" />
-                  </TableCell>
-                </TableRow>
-              ))
-            ) : activeSubTab === "guru" ? (
-              filteredTeachers.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={6} className="py-8 text-center text-slate-400 text-xs">
-                    {search ? "Tidak ada guru yang cocok dengan pencarian." : "Belum ada guru terdaftar."}
-                  </TableCell>
-                </TableRow>
-              ) : (
-                filteredTeachers.map((t, idx) => (
-                  <TableRow key={t.id} className="hover:bg-slate-50/80 transition-colors">
-                    <TableCell className="py-3.5 px-4 font-bold text-slate-400">{idx + 1}</TableCell>
-                    <TableCell className="py-3.5 px-4 font-mono font-medium text-slate-600 text-xs">
-                      {t.nomor_induk || t.nim_nip}
-                    </TableCell>
-                    <TableCell className="py-3.5 px-4">
-                      <div className="flex items-center gap-2.5">
-                        <Avatar className="h-8 w-8">
-                          <AvatarFallback className="bg-brand-50 text-brand-700 font-bold text-xs">
-                            {t.name ? t.name.charAt(0) : "G"}
-                          </AvatarFallback>
-                        </Avatar>
-                        <span className="font-bold text-slate-900">{t.name}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell className="py-3.5 px-4 text-slate-500 text-xs">{t.email}</TableCell>
-                    <TableCell className="py-3.5 px-4 text-center">
-                      <Badge className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold px-2.5 py-0.5">
-                        Aktif
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="py-3.5 px-4 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleOpenEditTeacher(t)}
-                          className="h-8 w-8 p-0 text-slate-500 hover:text-brand-600 hover:bg-blue-50 rounded-lg cursor-pointer"
-                          title="Edit Guru"
-                        >
-                          <Edit className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleOpenDelete("guru", t)}
-                          className="h-8 w-8 p-0 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg cursor-pointer"
-                          title="Hapus Guru"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )
-            ) : activeSubTab === "siswa" ? (
-              filteredStudents.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={6} className="py-8 text-center text-slate-400 text-xs">
-                    {search ? "Tidak ada siswa yang cocok dengan pencarian." : "Belum ada siswa terdaftar."}
-                  </TableCell>
-                </TableRow>
-              ) : (
-                filteredStudents.map((s, idx) => (
-                  <TableRow key={s.id} className="hover:bg-slate-50/80 transition-colors">
-                    <TableCell className="py-3.5 px-4 font-bold text-slate-400">{idx + 1}</TableCell>
-                    <TableCell className="py-3.5 px-4 font-mono font-medium text-slate-600 text-xs">
-                      {s.nomor_induk || s.nim_nip}
-                    </TableCell>
-                    <TableCell className="py-3.5 px-4">
-                      <div className="flex items-center gap-2.5">
-                        <Avatar className="h-8 w-8">
-                          <AvatarFallback className="bg-blue-50 text-blue-700 font-bold text-xs">
-                            {s.name ? s.name.charAt(0) : "S"}
-                          </AvatarFallback>
-                        </Avatar>
-                        <span className="font-bold text-slate-900">{s.name}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell className="py-3.5 px-4 text-slate-500 text-xs">{s.email}</TableCell>
-                    <TableCell className="py-3.5 px-4 text-center">
-                      <Badge className="bg-blue-50 text-blue-700 border border-blue-200 text-[11px] font-bold px-2.5 py-0.5">
-                        Aktif
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="py-3.5 px-4 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleOpenEditStudent(s)}
-                          className="h-8 w-8 p-0 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg cursor-pointer"
-                          title="Edit Siswa"
-                        >
-                          <Edit className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleOpenDelete("siswa", s)}
-                          className="h-8 w-8 p-0 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg cursor-pointer"
-                          title="Hapus Siswa"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )
-            ) : (
-              /* MATA PELAJARAN TABLE */
-              filteredCourses.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={6} className="py-8 text-center text-slate-400 text-xs">
-                    {search ? "Tidak ada mata pelajaran yang cocok dengan pencarian." : "Belum ada mata pelajaran terdaftar."}
-                  </TableCell>
-                </TableRow>
-              ) : (
-                filteredCourses.map((c, idx) => (
-                  <TableRow key={c.id} className="hover:bg-slate-50/80 transition-colors">
-                    <TableCell className="py-3.5 px-4 font-bold text-slate-400">{idx + 1}</TableCell>
-                    <TableCell className="py-3.5 px-4">
-                      <div className="flex items-center gap-2">
-                        <span className="h-7 w-7 rounded-lg bg-blue-50 text-blue-700 flex items-center justify-center font-bold text-xs shrink-0">
-                          <BookOpen className="h-3.5 w-3.5" />
-                        </span>
-                        <span className="font-bold text-slate-900">{c.title}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell className="py-3.5 px-4 font-medium text-slate-700">
-                      {c.instructor?.name || "Guru Pengampu Belum Ditentukan"}
-                    </TableCell>
-                    <TableCell className="py-3.5 px-4 text-slate-500 text-xs max-w-xs truncate">
-                      {c.description || "Mata pelajaran kurikulum semester aktif"}
-                    </TableCell>
-                    <TableCell className="py-3.5 px-4 text-center">
-                      <Badge className="bg-blue-50 text-blue-700 border border-blue-200 text-[11px] font-bold px-2.5 py-0.5">
-                        Aktif
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="py-3.5 px-4 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleOpenEditCourse(c)}
-                          className="h-8 w-8 p-0 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg cursor-pointer"
-                          title="Edit Mapel"
-                        >
-                          <Edit className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleOpenDelete("mapel", c)}
-                          className="h-8 w-8 p-0 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg cursor-pointer"
-                          title="Hapus Mapel"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )
-            )}
-          </TableBody>
+          <TableBody className="divide-y divide-slate-100">{renderRows()}</TableBody>
         </Table>
       </div>
 
-      {/* Teacher Modal (Create & Edit) */}
       <TeacherModal
-        isOpen={isTeacherModalOpen}
-        onClose={() => setIsTeacherModalOpen(false)}
-        onSuccess={fetchAllData}
-        teacherToEdit={teacherToEdit}
+        isOpen={isFormOpen("guru")}
+        onClose={closeForm}
+        onSuccess={reloadAll}
+        teacherToEdit={formItem}
       />
 
-      {/* Student Modal (Create & Edit) */}
       <StudentModal
-        isOpen={isStudentModalOpen}
-        onClose={() => setIsStudentModalOpen(false)}
-        onSuccess={fetchAllData}
-        studentToEdit={studentToEdit}
+        isOpen={isFormOpen("siswa")}
+        onClose={closeForm}
+        onSuccess={reloadAll}
+        studentToEdit={formItem}
       />
 
-      {/* Course Modal (Create & Edit Mata Pelajaran) */}
       <CourseModal
-        isOpen={isCourseModalOpen}
-        onClose={() => setIsCourseModalOpen(false)}
-        onSuccess={fetchAllData}
-        courseToEdit={courseToEdit}
-        teachers={teachers}
+        isOpen={isFormOpen("mapel")}
+        onClose={closeForm}
+        onSuccess={reloadAll}
+        courseToEdit={formItem}
       />
 
-      {/* Delete Confirmation Alert Modal */}
       <ConfirmDeleteModal
-        isOpen={isDeleteModalOpen}
-        onClose={() => setIsDeleteModalOpen(false)}
-        onConfirm={handleConfirmDelete}
-        title={
-          itemToDelete?.type === "guru"
-            ? "Hapus Data Guru"
-            : itemToDelete?.type === "siswa"
-            ? "Hapus Data Siswa"
-            : "Hapus Mata Pelajaran"
-        }
-        description={
-          itemToDelete?.type === "guru"
-            ? "Apakah Anda yakin ingin menghapus akun guru ini dari sistem database? Seluruh hak akses guru akan dinonaktifkan."
-            : itemToDelete?.type === "siswa"
-            ? "Apakah Anda yakin ingin menghapus akun siswa ini dari sistem database? Data ujian dan evaluasi siswa ini juga akan terhapus."
-            : "Apakah Anda yakin ingin menghapus mata pelajaran ini dari kurikulum? Seluruh bahan ajar yang terhubung akan dinonaktifkan."
-        }
+        isOpen={Boolean(del.target)}
+        onClose={del.cancelDelete}
+        onConfirm={del.confirmDelete}
+        isLoading={del.isDeleting}
+        title={del.target ? TABS[del.target.kind].deleteTitle : ""}
+        description={del.target ? DELETE_DESCRIPTIONS[del.target.kind] : ""}
         itemName={
-          itemToDelete
-            ? itemToDelete.type === "mapel"
-              ? itemToDelete.data.title
-              : `${itemToDelete.data.name} (${itemToDelete.type === "guru" ? "NIP" : "NIS"}: ${
-                  itemToDelete.data.nomor_induk || itemToDelete.data.nim_nip
-                })`
-            : ""
+          del.target?.kind === "mapel" || !del.target
+            ? (del.target?.name ?? "")
+            : `${del.target.name} (${del.target.kind === "guru" ? "NIP" : "NIS"}: ${del.target.number})`
         }
-        isLoading={isDeleting}
       />
     </Card>
   );

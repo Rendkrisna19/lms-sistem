@@ -7,6 +7,7 @@ use App\Models\Quiz;
 use App\Models\QuizAnswer;
 use App\Models\QuizAttempt;
 use App\Models\QuizOption;
+use App\Models\User;
 use App\Support\QuizGrader;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\Request;
@@ -40,7 +41,8 @@ class StudentQuizController extends Controller
             ->with([
                 'course:id,title',
                 'teacher:id,name',
-                'attempts' => fn ($q) => $q->where('user_id', $student->id),
+                // Percobaan terbaru lebih dulu: attempt pertama di koleksi = percobaan aktif
+                'attempts' => fn ($q) => $q->where('user_id', $student->id)->orderByDesc('attempt_no'),
             ])
             ->withCount('questions')
             ->withSum('questions as total_points', 'points')
@@ -95,20 +97,25 @@ class StudentQuizController extends Controller
         $student = $request->user();
         $quiz = $this->accessibleQuiz($request, $id);
 
-        $attempt = QuizAttempt::where('quiz_id', $quiz->id)->where('user_id', $student->id)->first();
+        $previous = $this->latestAttempt($quiz, $student);
+        $attempt = null;
 
-        if ($attempt) {
-            $attempt->setRelation('quiz', $quiz);
-            $attempt = $this->grader->finalizeIfExpired($attempt);
+        if ($previous) {
+            $previous->setRelation('quiz', $quiz);
+            $previous = $this->grader->finalizeIfExpired($previous);
 
-            if ($attempt->isFinished()) {
+            if (!$previous->isFinished()) {
+                $attempt = $previous; // lanjutkan sesi yang sedang berjalan
+            } elseif (!$previous->hasRetakeGranted()) {
                 return response()->json([
                     'status' => 'already_finished',
                     'message' => 'Anda sudah menyelesaikan ujian ini.',
-                    'data' => ['attempt' => $this->formatAttemptSummary($attempt, $quiz)],
+                    'data' => ['attempt' => $this->formatAttemptSummary($previous, $quiz)],
                 ], 409);
             }
-        } else {
+        }
+
+        if (!$attempt) {
             if ($quiz->status_state === 'upcoming') {
                 return $this->error('Ujian belum dibuka. Silakan kembali sesuai jadwal.', 403);
             }
@@ -130,6 +137,7 @@ class StudentQuizController extends Controller
                 $attempt = QuizAttempt::create([
                     'quiz_id' => $quiz->id,
                     'user_id' => $student->id,
+                    'attempt_no' => $previous ? $previous->attempt_no + 1 : 1,
                     'started_at' => now(),
                     'deadline_at' => $deadline,
                     'total_questions' => $totalQuestions,
@@ -137,7 +145,7 @@ class StudentQuizController extends Controller
                 ]);
             } catch (UniqueConstraintViolationException) {
                 // Permintaan ganda bersamaan: gunakan attempt yang sudah dibuat
-                $attempt = QuizAttempt::where('quiz_id', $quiz->id)->where('user_id', $student->id)->firstOrFail();
+                $attempt = $this->latestAttempt($quiz, $student);
             }
         }
 
@@ -315,10 +323,22 @@ class StudentQuizController extends Controller
             ->findOrFail($attemptId);
     }
 
+    private function latestAttempt(Quiz $quiz, User $student): ?QuizAttempt
+    {
+        return QuizAttempt::where('quiz_id', $quiz->id)
+            ->where('user_id', $student->id)
+            ->orderByDesc('attempt_no')
+            ->first();
+    }
+
+    /** Bisa mulai bila belum pernah mengerjakan, sedang berjalan, atau dibuka ulang oleh guru. */
     private function canStart(Quiz $quiz, ?QuizAttempt $attempt): bool
     {
-        if ($attempt) {
-            return !$attempt->isFinished();
+        if ($attempt && !$attempt->isFinished()) {
+            return true;
+        }
+        if ($attempt && !$attempt->hasRetakeGranted()) {
+            return false;
         }
         return $quiz->status_state === 'active' && $quiz->questions_count > 0;
     }
@@ -330,6 +350,8 @@ class StudentQuizController extends Controller
 
         return [
             'id' => $attempt->id,
+            'attempt_no' => $attempt->attempt_no,
+            'retake_granted' => $attempt->hasRetakeGranted(),
             'status' => $attempt->status,
             'started_at' => $attempt->started_at?->toIso8601String(),
             'deadline_at' => $attempt->deadline_at?->toIso8601String(),

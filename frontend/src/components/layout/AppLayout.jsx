@@ -5,12 +5,14 @@ import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
 import { Footer } from "./Footer";
 import { useAuth } from "../../lib/auth";
+import { useExamLock } from "../../lib/examLock";
 import { cn } from "../../lib/utils";
 
-/** Kerangka halaman setelah login: sidebar + header + konten. */
+/** Kerangka halaman setelah login: sidebar + header + konten. Navigasi dikunci selama ujian berlangsung. */
 export function AppLayout() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const locked = useExamLock();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -29,10 +31,11 @@ export function AppLayout() {
         setIsCollapsed={setIsCollapsed}
         mobileOpen={mobileOpen}
         setMobileOpen={setMobileOpen}
+        locked={locked}
       />
 
       <div className={cn("flex-1 flex flex-col min-w-0 w-full transition-all duration-300 ease-in-out", isCollapsed ? "lg:pl-20" : "lg:pl-64")}>
-        <Header currentUser={user} onOpenMobileMenu={() => setMobileOpen(true)} />
+        <Header currentUser={user} onOpenMobileMenu={() => setMobileOpen(true)} locked={locked} />
         <main className="flex-1 w-full p-4 sm:p-6 lg:p-8 flex flex-col gap-6">
           <Outlet />
           <Footer />

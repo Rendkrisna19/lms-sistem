@@ -1,23 +1,31 @@
-import { Building2, Calendar, Menu } from "lucide-react";
+import { Building2, Calendar, Lock, Menu } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
 import { ROLE_LABELS } from "../../lib/navigation";
 
-export function Header({ currentUser, onOpenMobileMenu }) {
+export function Header({ currentUser, onOpenMobileMenu, locked = false }) {
   const role = currentUser?.role || "murid";
   const today = new Date().toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 
   return (
     <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200/80 h-16 sm:h-20 px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-4 w-full">
       <div className="flex items-center gap-3 min-w-0">
-        <button
-          type="button"
-          onClick={onOpenMobileMenu}
-          className="lg:hidden h-10 w-10 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center transition-colors shrink-0"
-          aria-label="Buka menu navigasi"
-        >
-          <Menu className="h-5 w-5" />
-        </button>
+        {!locked && (
+          <button
+            type="button"
+            onClick={onOpenMobileMenu}
+            className="lg:hidden h-10 w-10 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center transition-colors shrink-0"
+            aria-label="Buka menu navigasi"
+          >
+            <Menu className="h-5 w-5" />
+          </button>
+        )}
+        {locked && (
+          <span className="lg:hidden inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800">
+            <Lock className="h-3.5 w-3.5" aria-hidden="true" />
+            Ujian berlangsung
+          </span>
+        )}
 
         <div className="hidden sm:flex items-center gap-2 text-sm text-slate-500 min-w-0">
           <Calendar className="h-4 w-4 text-brand-600 shrink-0" aria-hidden="true" />

@@ -1,9 +1,23 @@
 import { NavLink } from "react-router-dom";
-import { ChevronLeft, ChevronRight, GraduationCap, HelpCircle, LogOut, Settings } from "lucide-react";
+import { ChevronLeft, ChevronRight, GraduationCap, HelpCircle, Lock, LogOut, Settings } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { NAV_ITEMS, ROLE_LABELS } from "../../lib/navigation";
 
-function SidebarLink({ to, icon: Icon, label, showLabel, onNavigate, end }) {
+function SidebarLink({ to, icon: Icon, label, showLabel, onNavigate, end, locked = false }) {
+  if (locked) {
+    return (
+      <span
+        aria-disabled="true"
+        title={showLabel ? "Terkunci selama ujian berlangsung" : `${label} (terkunci selama ujian)`}
+        className="w-full flex items-center gap-3 px-3.5 py-3 rounded-2xl text-sm font-medium text-blue-200/50 cursor-not-allowed select-none"
+      >
+        <Icon className="h-5 w-5 shrink-0" aria-hidden="true" />
+        {showLabel && <span className="truncate flex-1">{label}</span>}
+        {showLabel && <Lock className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
+      </span>
+    );
+  }
+
   return (
     <NavLink
       to={to}
@@ -30,7 +44,7 @@ function SidebarLink({ to, icon: Icon, label, showLabel, onNavigate, end }) {
   );
 }
 
-export function Sidebar({ currentUser, onLogout, isCollapsed, setIsCollapsed, mobileOpen, setMobileOpen }) {
+export function Sidebar({ currentUser, onLogout, isCollapsed, setIsCollapsed, mobileOpen, setMobileOpen, locked = false }) {
   const role = currentUser?.role || "murid";
   const navItems = NAV_ITEMS[role] ?? [];
   const showLabel = !isCollapsed || mobileOpen;
@@ -85,14 +99,22 @@ export function Sidebar({ currentUser, onLogout, isCollapsed, setIsCollapsed, mo
         {/* Menu utama */}
         <nav className="flex-1 py-5 px-3 space-y-1.5 overflow-y-auto overflow-x-hidden">
           {navItems.map((item) => (
-            <SidebarLink key={item.path} to={item.path} icon={item.icon} label={item.label} showLabel={showLabel} onNavigate={closeMobile} />
+            <SidebarLink
+              key={item.path}
+              to={item.path}
+              icon={item.icon}
+              label={item.label}
+              showLabel={showLabel}
+              onNavigate={closeMobile}
+              locked={locked}
+            />
           ))}
         </nav>
 
         {/* Pengaturan & bantuan */}
         <div className="px-3 py-2 border-t border-white/10 space-y-1 shrink-0">
-          <SidebarLink to="/pengaturan" icon={Settings} label="Pengaturan" showLabel={showLabel} onNavigate={closeMobile} />
-          <SidebarLink to="/bantuan" icon={HelpCircle} label="Pusat Bantuan" showLabel={showLabel} onNavigate={closeMobile} />
+          <SidebarLink to="/pengaturan" icon={Settings} label="Pengaturan" showLabel={showLabel} onNavigate={closeMobile} locked={locked} />
+          <SidebarLink to="/bantuan" icon={HelpCircle} label="Pusat Bantuan" showLabel={showLabel} onNavigate={closeMobile} locked={locked} />
         </div>
 
         {/* Profil & keluar */}
@@ -119,9 +141,11 @@ export function Sidebar({ currentUser, onLogout, isCollapsed, setIsCollapsed, mo
           <button
             type="button"
             onClick={onLogout}
-            title={showLabel ? undefined : "Keluar akun"}
+            disabled={locked}
+            title={locked ? "Keluar dinonaktifkan selama ujian" : showLabel ? undefined : "Keluar akun"}
             className={cn(
-              "w-full flex items-center gap-2.5 px-3 py-2 rounded-2xl text-xs font-medium text-blue-100 hover:bg-red-500/20 hover:text-red-100 transition-colors",
+              "w-full flex items-center gap-2.5 px-3 py-2 rounded-2xl text-xs font-medium text-blue-100 transition-colors",
+              locked ? "opacity-50 cursor-not-allowed" : "hover:bg-red-500/20 hover:text-red-100",
               showLabel ? "justify-start" : "justify-center"
             )}
           >

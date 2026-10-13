@@ -1,14 +1,14 @@
 import { useMemo, useState } from "react";
-import { Award, Clock, CheckCircle2, PlayCircle, RefreshCw, Search, Sparkles } from "lucide-react";
+import { Award, Clock, CheckCircle2, PlayCircle, RefreshCw, Search } from "lucide-react";
 import { useApiQuery } from "../../hooks/useApiQuery";
 import { PageHeader } from "../../components/ui/page-header";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
-import { Badge } from "../../components/ui/badge";
 import { Skeleton } from "../../components/ui/skeleton";
 import { EmptyState } from "../../components/ui/empty-state";
 import { Alert } from "../../components/ui/alert";
-import { StudentQuizCard, studentQuizState } from "../../components/quiz/student/StudentQuizCard";
+import { StudentQuizCard } from "../../components/quiz/student/StudentQuizCard";
+import { isStartable, studentQuizState } from "../../features/quiz/studentQuizState";
 
 export function StudentQuizListPage() {
   const { data, error, isLoading, reload } = useApiQuery("/student/quizzes");
@@ -25,7 +25,7 @@ export function StudentQuizListPage() {
 
     quizzes.forEach((q) => {
       const state = studentQuizState(q);
-      if (state === "available") availableCount++;
+      if (isStartable(state)) availableCount++;
       else if (state === "in_progress") inProgressCount++;
       else if (state === "finished") finishedCount++;
     });
@@ -42,7 +42,7 @@ export function StudentQuizListPage() {
     const q = search.trim().toLowerCase();
     return quizzes.filter((item) => {
       const state = studentQuizState(item);
-      if (filterTab === "available" && state !== "available") return false;
+      if (filterTab === "available" && !isStartable(state)) return false;
       if (filterTab === "in_progress" && state !== "in_progress") return false;
       if (filterTab === "finished" && state !== "finished") return false;
 
@@ -80,7 +80,7 @@ export function StudentQuizListPage() {
       />
 
       {error && (
-        <Alert variant="destructive">
+        <Alert variant="danger">
           Gagal memuat daftar ujian online: {error.message || "Terjadi kesalahan pada server."}
         </Alert>
       )}

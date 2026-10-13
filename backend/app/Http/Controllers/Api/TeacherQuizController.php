@@ -226,7 +226,8 @@ class TeacherQuizController extends Controller
                 ->orderBy('name')->get(['id', 'name', 'nomor_induk', 'nim_nip'])
             : collect();
 
-        $attempts = QuizAttempt::where('quiz_id', $quiz->id)->get()->keyBy('user_id');
+        // Percobaan terakhir per siswa (urut nomor percobaan, siswa terakhir menimpa yang sebelumnya)
+        $attempts = QuizAttempt::where('quiz_id', $quiz->id)->orderBy('attempt_no')->get()->keyBy('user_id');
 
         $rows = $students->map(function ($student) use ($attempts, $quiz) {
             $attempt = $attempts->get($student->id);
@@ -235,6 +236,13 @@ class TeacherQuizController extends Controller
                 'name' => $student->name,
                 'nomor_induk' => $student->nomor_induk ?? $student->nim_nip,
                 'attempt_id' => $attempt?->id,
+                'attempt_no' => $attempt?->attempt_no,
+                'retake_granted' => $attempt?->hasRetakeGranted() ?? false,
+                // Remedial yang belum dibuka aksesnya dapat diberi kesempatan ujian ulang
+                'can_grant_retake' => $attempt !== null
+                    && $attempt->isFinished()
+                    && !$attempt->hasRetakeGranted()
+                    && (float) $attempt->score < (float) $quiz->passing_score,
                 'status' => $attempt?->status ?? 'not_started',
                 'score' => $attempt && $attempt->isFinished() ? (float) $attempt->score : null,
                 'total_correct' => $attempt?->total_correct,
@@ -345,6 +353,76 @@ class TeacherQuizController extends Controller
     // ---------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------
+
+    /**
+     * Buka akses ujian ulang untuk siswa remedial (percobaan terakhir belum lulus KKM).
+     */
+    public function grantRetake(Request $request, $id, $studentId)
+    {
+        $quiz = $this->ownQuiz($request, $id);
+        $attempt = $this->studentLatestAttempt($quiz, $studentId);
+
+        if (!$attempt || !$attempt->isFinished()) {
+            return $this->retakeError('Siswa belum menyelesaikan ujian ini.');
+        }
+        if ((float) $attempt->score >= (float) $quiz->passing_score) {
+            return $this->retakeError('Siswa sudah lulus KKM, ujian ulang tidak diperlukan.');
+        }
+        if ($attempt->hasRetakeGranted()) {
+            return $this->retakeError('Akses ujian ulang sudah dibuka untuk siswa ini.');
+        }
+
+        $attempt->update([
+            'retake_granted_at' => now(),
+            'retake_granted_by' => $request->user()->id,
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Akses ujian ulang dibuka. Siswa dapat mengerjakan ulang ujian ini.',
+            'data' => ['student_id' => (int) $studentId, 'retake_granted' => true],
+        ]);
+    }
+
+    /**
+     * Cabut akses ujian ulang yang belum dipakai siswa.
+     */
+    public function revokeRetake(Request $request, $id, $studentId)
+    {
+        $quiz = $this->ownQuiz($request, $id);
+        $attempt = $this->studentLatestAttempt($quiz, $studentId);
+
+        if (!$attempt || !$attempt->hasRetakeGranted()) {
+            return $this->retakeError('Tidak ada akses ujian ulang yang aktif untuk siswa ini.');
+        }
+
+        $attempt->update(['retake_granted_at' => null, 'retake_granted_by' => null]);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Akses ujian ulang dicabut.',
+            'data' => ['student_id' => (int) $studentId, 'retake_granted' => false],
+        ]);
+    }
+
+    private function studentLatestAttempt(Quiz $quiz, $studentId): ?QuizAttempt
+    {
+        // Hanya siswa di kelas ujian yang dapat dikelola
+        User::where('role', 'murid')
+            ->where('classroom_id', $quiz->classroom_id)
+            ->whereKey($studentId)
+            ->firstOrFail();
+
+        return QuizAttempt::where('quiz_id', $quiz->id)
+            ->where('user_id', $studentId)
+            ->orderByDesc('attempt_no')
+            ->first();
+    }
+
+    private function retakeError(string $message)
+    {
+        return response()->json(['status' => 'error', 'message' => $message], 422);
+    }
 
     private function ownQuiz(Request $request, $id): Quiz
     {

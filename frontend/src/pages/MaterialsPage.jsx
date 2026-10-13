@@ -30,6 +30,7 @@ import { Card } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { Skeleton } from "../components/ui/skeleton";
 import { CustomSelect } from "../components/ui/custom-select";
+import { StatCard } from "../components/ui/stat-card";
 import { Pagination } from "../components/ui/pagination";
 import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from "../components/ui/table";
 import { UploadMaterialModal } from "../components/modals/UploadMaterialModal";
@@ -97,6 +98,22 @@ export function MaterialsPage({ currentUser }) {
   useEffect(() => {
     fetchMaterials();
   }, [currentUser?.id, role]);
+
+  // Buka materi. Untuk siswa, akses dicatat ke server sebagai dasar analitik keaktifan
+  // (guru, admin sekolah, admin master). Kegagalan pencatatan tidak menghalangi belajar.
+  const handleOpenMaterial = (item) => {
+    setPreviewMaterial(item);
+    if (isTeacher) return;
+
+    api.post(`/student/materials/${item.id}/access`).catch(() => {});
+    if (!item.my_access_count) {
+      setMaterials((prev) =>
+        prev.map((m) =>
+          m.id === item.id ? { ...m, my_access_count: 1, my_last_accessed_at: new Date().toISOString() } : m
+        )
+      );
+    }
+  };
 
   // Toggle Status Aktif / Nonaktif
   const handleToggleStatus = async (item) => {
@@ -190,6 +207,8 @@ export function MaterialsPage({ currentUser }) {
     return true;
   });
 
+  const studiedCount = materials.filter((m) => m.my_access_count > 0).length;
+
   const totalPages = Math.ceil(filteredMaterials.length / itemsPerPage) || 1;
   const paginatedMaterials = filteredMaterials.slice(
     (currentPage - 1) * itemsPerPage,
@@ -240,25 +259,29 @@ export function MaterialsPage({ currentUser }) {
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => toast.info("Fitur Export Excel akan segera tersedia.")}
-            className="rounded-xl border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer text-xs h-9 gap-1.5"
-          >
-            <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
-            <span>Export Excel</span>
-          </Button>
+          {isTeacher && (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => toast.info("Fitur Export Excel akan segera tersedia.")}
+                className="rounded-xl border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer text-xs h-9 gap-1.5"
+              >
+                <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
+                <span>Export Excel</span>
+              </Button>
 
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => toast.info("Fitur Export PDF akan segera tersedia.")}
-            className="rounded-xl border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer text-xs h-9 gap-1.5"
-          >
-            <FileText className="h-4 w-4 text-red-600" />
-            <span>Export PDF</span>
-          </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => toast.info("Fitur Export PDF akan segera tersedia.")}
+                className="rounded-xl border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer text-xs h-9 gap-1.5"
+              >
+                <FileText className="h-4 w-4 text-red-600" />
+                <span>Export PDF</span>
+              </Button>
+            </>
+          )}
 
           <Button
             variant="outline"
@@ -342,6 +365,23 @@ export function MaterialsPage({ currentUser }) {
               <span className="text-xs text-slate-400">disembunyikan</span>
             </div>
           </Card>
+        </div>
+      )}
+
+      {/* 2b. Progres belajar siswa (dari riwayat akses materi) */}
+      {!isTeacher && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <StatCard label="Materi Tersedia" value={materials.length} icon={BookOpen} isLoading={isLoading} />
+          <StatCard label="Sudah Dipelajari" value={studiedCount} icon={CheckCircle2} tone="emerald" isLoading={isLoading} />
+          <StatCard label="Belum Dibuka" value={materials.length - studiedCount} icon={Eye} tone="amber" isLoading={isLoading} />
+          <StatCard
+            label="Progres Belajar"
+            value={materials.length ? Math.round((studiedCount / materials.length) * 100) : 0}
+            suffix="%"
+            icon={Sparkles}
+            tone="indigo"
+            isLoading={isLoading}
+          />
         </div>
       )}
 
@@ -538,6 +578,15 @@ export function MaterialsPage({ currentUser }) {
                           <h4 className="text-xs sm:text-sm font-bold text-slate-900 leading-tight">
                             {item.title}
                           </h4>
+                          {!isTeacher && (
+                            item.my_access_count > 0 ? (
+                              <Badge variant="success" className="mt-1 text-[10px] gap-1">
+                                <CheckCircle2 className="h-3 w-3" /> Sudah dipelajari
+                              </Badge>
+                            ) : (
+                              <Badge variant="warning" className="mt-1 text-[10px]">Belum dibuka</Badge>
+                            )
+                          )}
                           {item.description ? (
                             <p className="text-[11px] text-slate-500 mt-1 line-clamp-2 leading-relaxed">
                               {item.description}
@@ -663,7 +712,7 @@ export function MaterialsPage({ currentUser }) {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => setPreviewMaterial(item)}
+                            onClick={() => handleOpenMaterial(item)}
                             title="Lihat / Putar Berkas"
                             className="h-8 px-2.5 rounded-xl text-blue-600 hover:text-blue-700 hover:bg-blue-50 cursor-pointer text-xs gap-1 font-semibold"
                           >

@@ -22,15 +22,20 @@ class QuizAttempt extends Model
         'total_correct',
         'total_questions',
         'status',
+        'attempt_no',
+        'retake_granted_at',
+        'retake_granted_by',
     ];
 
     protected $casts = [
         'started_at' => 'datetime',
         'deadline_at' => 'datetime',
         'submitted_at' => 'datetime',
+        'retake_granted_at' => 'datetime',
         'score' => 'float',
         'total_correct' => 'integer',
         'total_questions' => 'integer',
+        'attempt_no' => 'integer',
     ];
 
     protected $appends = [
@@ -44,6 +49,12 @@ class QuizAttempt extends Model
         }
         $passingScore = $this->quiz?->passing_score ?? 70;
         return $this->score >= $passingScore;
+    }
+
+    /** Attempt terakhir yang dibuka ulang oleh guru (remedial). */
+    public function hasRetakeGranted(): bool
+    {
+        return $this->retake_granted_at !== null;
     }
 
     public function isFinished(): bool
